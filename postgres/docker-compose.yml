@@ -1,7 +1,7 @@
 version: '3.9'
 
 services:
-  db:
+  postgres:
     container_name: postgres
     image: postgres:latest
     environment:
@@ -12,7 +12,8 @@ services:
       - postgresql_bin:/usr/lib/postgresql
       - postgresql_data:/var/lib/postgresql/data
       - ./northwind.sql:/docker-entrypoint-initdb.d/northwind.sql
-      - ./files:/files
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
     ports:
       - "5432:5432"
     networks:
@@ -26,4 +27,4 @@ volumes:
 
 networks:
   ProjectHost:
-    driver: bridge
+    external: true

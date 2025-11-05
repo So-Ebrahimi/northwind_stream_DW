@@ -31,7 +31,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
     networks:
       - ProjectHost
-
+      
 networks:
   ProjectHost:
     external: true
