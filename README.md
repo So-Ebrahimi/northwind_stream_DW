@@ -1,10 +1,18 @@
 # Data-pipeline-for-northwind
+docker network create ProjectHost
+docker-compose -f ./postgres/docker-compose.yml up -d
+docker-compose -f ./kafka/docker-compose.yml up -d
+docker-compose -f ./debezium/docker-compose.yml up -d
 
-## Non-local run (CI)
 
-If you prefer not to run anything locally, trigger the GitHub Actions workflow:
+# ClickHouse (replicated) and wiring Debezium topics to ClickHouse
+docker-compose -f ./clickhouse/docker-compose.yml up -d
 
-- Go to Actions → "Debezium CDC for Northwind" → Run workflow.
-- The workflow brings up Kafka, Postgres, and Debezium in CI and registers the Northwind Postgres CDC connector automatically.
+# Apply ingestion DDLs (creates Kafka sources, MVs, and target tables)
+curl -sS 'http://localhost:9123/?query=' --data-binary @clickhouse/northwind_to_clickhouse.sql
 
-Details and local config are under `debezium/`, `kafka/`, and `postgres/` if needed.
+# Verify data arriving (examples)
+curl -s 'http://localhost:9123/?query=SELECT%20count()%20FROM%20northwind.customers'
+curl -s 'http://localhost:9123/?query=SELECT%20count()%20FROM%20northwind.orders'
+
+clickhouse-client --multiquery < /tmp/init-db/init.sql

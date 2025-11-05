@@ -1,0 +1,77 @@
+version: '3'
+
+services:
+  clickhouse-zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.1
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOOKEEPER_CLIENT_PORT=2181
+    ports:
+      - "12182:2181"
+      - "12888:2888"
+      - "13888:3888"
+    networks:
+      - ProjectHost
+
+  clickhouse1:
+    image: clickhouse/clickhouse-server
+    container_name: clickhouse1
+    user: root
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=123456
+    ports:
+      - "8002:9000"
+      - "9123:8123"
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - ProjectHost
+    depends_on:
+      - clickhouse-zookeeper
+    volumes:
+      - type: bind
+        source: ./config_replica1.xml
+        target: /etc/clickhouse-server/config.xml
+      - ./init-db/init.sql:/tmp/init-db/init.sql
+    entrypoint: >
+      bash -c "
+        /entrypoint.sh &   # start clickhouse server in background
+        sleep 10            # wait for clickhouse server to start
+        clickhouse-client --multiquery < /tmp/init-db/init.sql
+        wait
+      "
+
+
+
+  clickhouse2:
+    image: clickhouse/clickhouse-server
+    container_name: clickhouse2
+    user: root  # نیاز داریم برای اجرای sudo
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=123456
+    ports:
+      - "8003:9000"
+      - "9124:8123"
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - ProjectHost
+    depends_on:
+      - clickhouse-zookeeper
+    volumes:
+      - type: bind
+        source: ./config_replica2.xml
+        target: /etc/clickhouse-server/config.xml
+      - ./init-db/init.sql:/tmp/init-db/init.sql
+
+networks:
+  ProjectHost:
+    external: true
