@@ -3,27 +3,17 @@ version: '3.9'
 services:
   postgres:
     container_name: postgres
-    image: postgres:latest
-    environment:
-      POSTGRES_DB: northwind
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    volumes:
-      - postgresql_bin:/usr/lib/postgresql
-      - postgresql_data:/var/lib/postgresql/data
-      - ./northwind.sql:/docker-entrypoint-initdb.d/northwind.sql
-      - ./postgresql.conf:/etc/postgresql/postgresql.conf
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    image: my-postgres
     ports:
       - "5432:5432"
-    networks:
-      - ProjectHost
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
 volumes:
-  postgresql_data:
+  postgres_data:
     driver: local
-  postgresql_bin:
-    driver: local
+
 
 networks:
   ProjectHost:

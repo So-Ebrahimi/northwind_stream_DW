@@ -213,4 +213,3 @@ ENGINE = Distributed(replicated_cluster, northwind, orders_local, rand());
 CREATE TABLE IF NOT EXISTS northwind.order_details AS northwind.order_details_local
 ENGINE = Distributed(replicated_cluster, northwind, order_details_local, rand());
 
-
