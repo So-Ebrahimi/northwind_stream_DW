@@ -4,16 +4,20 @@ services:
   postgres:
     container_name: postgres
     image: my-postgres
+    environment:
+      POSTGRES_DB: northwind
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+    networks:
+      - ProjectHost
 
 volumes:
   postgres_data:
     driver: local
-
 
 networks:
   ProjectHost:
