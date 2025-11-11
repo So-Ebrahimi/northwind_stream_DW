@@ -71,6 +71,7 @@ RUN curl https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.0/delta-stora
 
 # Download hudi jars
 RUN curl https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3-bundle_2.12/0.15.0/hudi-spark3-bundle_2.12-0.15.0.jar -Lo /opt/spark/jars/hudi-spark3-bundle_2.12-0.15.0.jar
+RUN curl https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.7.2/clickhouse-jdbc-0.7.2-all.jar -Lo /opt/spark/jars/clickhouse-jdbc-0.7.2-all.jar
 
 COPY entrypoint.sh .
 RUN chmod u+x /opt/spark/entrypoint.sh

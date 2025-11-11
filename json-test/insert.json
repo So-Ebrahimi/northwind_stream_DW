@@ -1,0 +1,205 @@
+{
+  "schema": {
+    "type": "struct",
+    "fields": [
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "int16",
+            "optional": false,
+            "field": "region_id"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "region_description"
+          }
+        ],
+        "optional": true,
+        "name": "northwind.public.region.Value",
+        "field": "before"
+      },
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "int16",
+            "optional": false,
+            "field": "region_id"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "region_description"
+          }
+        ],
+        "optional": true,
+        "name": "northwind.public.region.Value",
+        "field": "after"
+      },
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "string",
+            "optional": false,
+            "field": "version"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "connector"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "name"
+          },
+          {
+            "type": "int64",
+            "optional": false,
+            "field": "ts_ms"
+          },
+          {
+            "type": "string",
+            "optional": true,
+            "name": "io.debezium.data.Enum",
+            "version": 1,
+            "parameters": {
+              "allowed": "true,last,false,incremental"
+            },
+            "default": "false",
+            "field": "snapshot"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "db"
+          },
+          {
+            "type": "string",
+            "optional": true,
+            "field": "sequence"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "ts_us"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "ts_ns"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "schema"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "table"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "txId"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "lsn"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "xmin"
+          }
+        ],
+        "optional": false,
+        "name": "io.debezium.connector.postgresql.Source",
+        "field": "source"
+      },
+      {
+        "type": "string",
+        "optional": false,
+        "field": "op"
+      },
+      {
+        "type": "int64",
+        "optional": true,
+        "field": "ts_ms"
+      },
+      {
+        "type": "int64",
+        "optional": true,
+        "field": "ts_us"
+      },
+      {
+        "type": "int64",
+        "optional": true,
+        "field": "ts_ns"
+      },
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "string",
+            "optional": false,
+            "field": "id"
+          },
+          {
+            "type": "int64",
+            "optional": false,
+            "field": "total_order"
+          },
+          {
+            "type": "int64",
+            "optional": false,
+            "field": "data_collection_order"
+          }
+        ],
+        "optional": true,
+        "name": "event.block",
+        "version": 1,
+        "field": "transaction"
+      }
+    ],
+    "optional": false,
+    "name": "northwind.public.region.Envelope",
+    "version": 2
+  },
+  "payload": {
+    "before": null,
+    "after": {
+      "region_id": 6,
+      "region_description": "tehran"
+    },
+    "source": {
+      "version": "2.6.2.Final",
+      "connector": "postgresql",
+      "name": "northwind",
+      "ts_ms": 1762773067498,
+      "snapshot": "false",
+      "db": "northwind",
+      "sequence": [
+        "27552712",
+        "27702600"
+      ],
+      "ts_us": 1762773067498359,
+      "ts_ns": 1762773067498359000,
+      "schema": "public",
+      "table": "region",
+      "txId": 4166,
+      "lsn": 27702600,
+      "xmin": null
+    },
+    "op": "c",
+    "ts_ms": 1762773067962,
+    "ts_us": 1762773067962535,
+    "ts_ns": 1762773067962535219,
+    "transaction": null
+  }
+}

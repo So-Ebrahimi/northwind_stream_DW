@@ -1,22 +1,20 @@
--- Create database
+-- ایجاد دیتابیس
 CREATE DATABASE IF NOT EXISTS northwind ON CLUSTER replicated_cluster;
 
-CREATE TABLE IF NOT EXISTS northwind.customers_local ON CLUSTER replicated_cluster
+-- ایجاد جدول با ReplicatedMergeTree
+CREATE TABLE IF NOT EXISTS northwind.northwind_region
+ON CLUSTER replicated_cluster
 (
-    CustomerID Int32,
-    CompanyName String,
-    ContactName Nullable(String),
-    ContactTitle Nullable(String),
-    Address Nullable(String),
-    City Nullable(String),
-    Region Nullable(String),
-    PostalCode Nullable(String),
-    Country Nullable(String),
-    Phone Nullable(String),
-    Fax Nullable(String),
-    _op LowCardinality(String),
-    _ts_ms DateTime64(3)
+    region_id Int16,
+    region_description String,
+    operation CHAR(1),
+    updatedate DateTime,
+    is_deleted UInt8
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/customers','{replica}')
-ORDER BY CustomerID;
+ENGINE = ReplicatedReplacingMergeTree(
+    '/clickhouse/tables/northwind/northwind_region/{replica}',
+    '{replica}'
+)
+ORDER BY region_id;
+
 
