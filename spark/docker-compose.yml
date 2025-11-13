@@ -10,7 +10,7 @@ services:
       timeout: 3s
       retries: 3
     volumes:
-      - ./spark-logs:/opt/spark/spark-events
+      # - ./spark-logs:/opt/spark/spark-events
       - ./scripts:/opt/spark/scripts
     env_file:
       - .env.spark
@@ -31,7 +31,7 @@ services:
     env_file:
       - .env.spark
     volumes:
-      - ./spark-logs:/opt/spark/spark-events
+      # - ./spark-logs:/opt/spark/spark-events
       - ./scripts:/opt/spark/scripts
     ports:
       - '18080:18080'
@@ -47,7 +47,7 @@ services:
     env_file:
       - .env.spark
     volumes:
-      - ./spark-logs:/opt/spark/spark-events
+      # - ./spark-logs:/opt/spark/spark-events
       - ./scripts:/opt/spark/scripts
     networks:
       - ProjectHost
