@@ -38,7 +38,6 @@ final_df = parsed_df.select(
     col("payload.region_description").alias("region_description"),
     col("payload.__op").alias("operation"),
     current_timestamp().alias("updatedate"),
-    when(col("payload.__op") == "d", lit(True)).otherwise(lit(False)).alias("is_deleted"),
 )
 
 # # چاپ داده‌ها روی کنسول

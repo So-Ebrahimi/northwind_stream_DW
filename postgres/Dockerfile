@@ -1,4 +1,4 @@
-FROM postgres:latest
+FROM postgres:18
 ENV POSTGRES_DB=northwind
 ENV POSTGRES_USER=postgres
 ENV POSTGRES_PASSWORD=postgres
