@@ -10,7 +10,7 @@ ON CLUSTER replicated_cluster
     description String,
     picture String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -27,7 +27,7 @@ ON CLUSTER replicated_cluster
     customer_id String,
     customer_type_id String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -44,7 +44,7 @@ ON CLUSTER replicated_cluster
     customer_type_id String,
     customer_desc String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -70,7 +70,7 @@ ON CLUSTER replicated_cluster
     phone String,
     fax String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -103,7 +103,7 @@ ON CLUSTER replicated_cluster
     reports_to Int16,
     photo_path String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -120,7 +120,7 @@ ON CLUSTER replicated_cluster
     employee_id Int16,
     territory_id String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -140,7 +140,7 @@ ON CLUSTER replicated_cluster
     quantity Int16,
     discount Float32,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -169,7 +169,7 @@ ON CLUSTER replicated_cluster
     ship_postal_code String,
     ship_country String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -194,7 +194,7 @@ ON CLUSTER replicated_cluster
     reorder_level Int16,
     discontinued UInt8,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -211,7 +211,7 @@ ON CLUSTER replicated_cluster
     region_id Int16,
     region_description String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -229,7 +229,7 @@ ON CLUSTER replicated_cluster
     company_name String,
     phone String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -256,7 +256,7 @@ ON CLUSTER replicated_cluster
     fax String,
     homepage String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -274,7 +274,7 @@ ON CLUSTER replicated_cluster
     territory_description String,
     region_id Int16,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(
@@ -293,7 +293,7 @@ ON CLUSTER replicated_cluster
     state_abbr String,
     state_region String,
     operation CHAR(1),
-    updatedate DateTime,
+    updatedate DateTime
 
 )
 ENGINE = ReplicatedReplacingMergeTree(

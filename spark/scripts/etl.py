@@ -1,7 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, get_json_object, when, lit, current_timestamp, struct, to_json
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
-
 spark = (
     SparkSession.builder
     .appName("KafkaDebeziumClickHouse")
