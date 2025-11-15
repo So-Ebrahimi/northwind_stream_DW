@@ -2,10 +2,10 @@ version: '3.9'
 
 services:
   connect:
-    image: debezium/connect:2.6
+    image: sobhanebrahimi/debezium:0.1
     container_name: debezium-connect
     environment:
-      BOOTSTRAP_SERVERS: kafka:29092
+      BOOTSTRAP_SERVERS: kafka:9092
       GROUP_ID: "1"
       CONFIG_STORAGE_TOPIC: connect_configs
       OFFSET_STORAGE_TOPIC: connect_offsets
