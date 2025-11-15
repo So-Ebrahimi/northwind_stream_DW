@@ -1,105 +1,37 @@
-FROM python:3.12.9-bullseye AS spark-base
+FROM bitnamilegacy/spark:3.5.6 AS spark-base
+USER root
+RUN mkdir -p /var/lib/apt/lists/partial \
+    && apt-get update \
+    && apt-get install -y wget \
+    && rm -rf /var/lib/apt/lists/*
 
+# فولدر JARها
+# RUN mkdir -p /opt/bitnami/spark/jars
+# اضافه کردن ClickHouse JDBC
+COPY ./scripts/clickhouse-jdbc-0.7.2-all.jar /opt/bitnami/spark/jars/
 
-RUN apt-get update 
-RUN    apt-get install -y --no-install-recommends \
-      sudo \
-      curl \
-      vim \
-      unzip \
-      rsync \
-      openjdk-11-jdk \
-      build-essential \
-      software-properties-common \
-      ssh && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# دانلود JARهای Spark/Kafka/Hadoop
+RUN wget -O /opt/bitnami/spark/jars/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+        https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.12/3.5.0/spark-sql-kafka-0-10_2.12-3.5.0.jar && \
+    wget -O /opt/bitnami/spark/jars/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+        https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.0/spark-token-provider-kafka-0-10_2.12-3.5.0.jar && \
+    wget -O /opt/bitnami/spark/jars/kafka-clients-3.4.1.jar \
+        https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.4.1/kafka-clients-3.4.1.jar && \
+    wget -O /opt/bitnami/spark/jars/jsr305-3.0.0.jar \
+        https://repo1.maven.org/maven2/com/google/code/findbugs/jsr305/3.0.0/jsr305-3.0.0.jar && \
+    wget -O /opt/bitnami/spark/jars/commons-pool2-2.11.1.jar \
+        https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar && \
+    wget -O /opt/bitnami/spark/jars/hadoop-client-runtime-3.3.4.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.4/hadoop-client-runtime-3.3.4.jar && \
+    wget -O /opt/bitnami/spark/jars/lz4-java-1.8.0.jar \
+        https://repo1.maven.org/maven2/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0.jar && \
+    wget -O /opt/bitnami/spark/jars/snappy-java-1.1.10.3.jar \
+        https://repo1.maven.org/maven2/org/xerial/snappy/snappy-java/1.1.10.3/snappy-java-1.1.10.3.jar && \
+    # wget -O /opt/bitnami/spark/jars/slf4j-api-2.0.7.jar \
+    #     https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.7/slf4j-api.jar && \
+    wget -O /opt/bitnami/spark/jars/hadoop-client-api-3.3.4.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.3.4/hadoop-client-api-3.3.4.jar && \
+    wget -O /opt/bitnami/spark/jars/commons-logging-1.1.3.jar \
+        https://repo1.maven.org/maven2/commons-logging/commons-logging/1.1.3/commons-logging-1.1.3.jar
 
-## Download spark and hadoop dependencies and install
-
-# ENV variables
-ENV SPARK_VERSION=3.5.7
-
-ENV SPARK_HOME=${SPARK_HOME:-"/opt/spark"}
-ENV HADOOP_HOME=${HADOOP_HOME:-"/opt/hadoop"}
-
-ENV SPARK_MASTER_PORT=7077
-ENV SPARK_MASTER_HOST=spark-master
-ENV SPARK_MASTER="spark://$SPARK_MASTER_HOST:$SPARK_MASTER_PORT"
-
-ENV PYTHONPATH=$SPARK_HOME/python/:$PYTHONPATH
-ENV PYSPARK_PYTHON=python3
-
-# Add iceberg spark runtime jar to IJava classpath
-ENV IJAVA_CLASSPATH=/opt/spark/jars/*
-
-RUN mkdir -p ${HADOOP_HOME} && mkdir -p ${SPARK_HOME}
-WORKDIR ${SPARK_HOME}
-
-# Download spark
-# see resources: https://dlcdn.apache.org/spark/spark-3.5.5/
-# filename: spark-3.5.5-bin-hadoop3.tgz 
-RUN mkdir -p ${SPARK_HOME} \
-    && curl https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz -o spark-${SPARK_VERSION}-bin-hadoop3.tgz \
-    && tar xvzf spark-${SPARK_VERSION}-bin-hadoop3.tgz --directory ${SPARK_HOME} --strip-components 1 \
-    && rm -rf spark-${SPARK_VERSION}-bin-hadoop3.tgz
-
-# Add spark binaries to shell and enable execution
-RUN chmod u+x /opt/spark/sbin/* && \
-    chmod u+x /opt/spark/bin/*
-ENV PATH="$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin"
-
-# Add a spark config for all nodes
-COPY conf/spark-defaults.conf "$SPARK_HOME/conf/"
-
-
-FROM spark-base AS pyspark
-
-# Install python deps
-COPY requirements.txt .
-RUN pip3 install -r requirements.txt
-
-
-FROM pyspark AS pyspark-runner
-
-# Download iceberg spark runtime
-RUN curl https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.4_2.12/1.4.3/iceberg-spark-runtime-3.4_2.12-1.4.3.jar -Lo /opt/spark/jars/iceberg-spark-runtime-3.4_2.12-1.4.3.jar
-
-# Download delta jars
-RUN curl https://repo1.maven.org/maven2/io/delta/delta-core_2.12/2.4.0/delta-core_2.12-2.4.0.jar -Lo /opt/spark/jars/delta-core_2.12-2.4.0.jar
-RUN curl https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.0/delta-spark_2.12-3.2.0.jar -Lo /opt/spark/jars/delta-spark_2.12-3.2.0.jar
-RUN curl https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.0/delta-storage-3.2.0.jar -Lo /opt/spark/jars/delta-storage-3.2.0.jar
-
-# Download hudi jars
-RUN curl https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3-bundle_2.12/0.15.0/hudi-spark3-bundle_2.12-0.15.0.jar -Lo /opt/spark/jars/hudi-spark3-bundle_2.12-0.15.0.jar
-RUN curl https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.7.2/clickhouse-jdbc-0.7.2-all.jar -Lo /opt/spark/jars/clickhouse-jdbc-0.7.2-all.jar
-
-COPY entrypoint.sh .
-RUN chmod u+x /opt/spark/entrypoint.sh
-
-
-# Optionally install Jupyter
-# FROM pyspark-runner AS pyspark-jupyter
-
-# RUN pip3 install notebook
-
-# ENV JUPYTER_PORT=8889
-
-# ENV PYSPARK_DRIVER_PYTHON=jupyter
-# ENV PYSPARK_DRIVER_PYTHON_OPTS="notebook --no-browser --allow-root --ip=0.0.0.0 --port=${JUPYTER_PORT}"
-# # --ip=0.0.0.0 - listen all interfaces
-# # --port=${JUPYTER_PORT} - listen ip on port 8889
-# # --allow-root - to run Jupyter in this container by root user. It is adviced to change the user to non-root.
-
-
-ENTRYPOINT ["./entrypoint.sh"]
-CMD [ "bash" ]
-
-# Now go to interactive shell mode
-# -$ docker exec -it spark-master /bin/bash 
-# then execute
-# -$ pyspark
-
-# If Jupyter is installed, you will see an URL: `http://127.0.0.1:8889/?token=...`
-# This will open Jupyter web UI in your host machine browser.
-# Then go to /warehouse/ and test the installation.
+ENV SPARK_CLASSPATH="/opt/bitnami/spark/jars/*"

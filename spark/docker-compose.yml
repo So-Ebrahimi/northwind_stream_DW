@@ -1,61 +1,69 @@
+version: '3.9'
+
 services:
   spark-master:
+    image: sobhanebrahimi/spark:0.1
     container_name: spark-master
-    build: .
-    image: spark-image
-    entrypoint: ['./entrypoint.sh', 'master']
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-    volumes:
-      # - ./spark-logs:/opt/spark/spark-events
-      - ./scripts:/opt/spark/scripts
-    env_file:
-      - .env.spark
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - HOME=/tmp
     ports:
-      - '8080:8080' # Spark master Web UI
-      - '7077:7077' # For spark-node-to-spark-node queries
-      - '4040:4040' # Spark worker data
-      - '8889:8889' # Optionaly - Jupyter web UI
-    networks:
-      - ProjectHost
-
-  spark-history-server:
-    container_name: spark-history
-    image: spark-image
-    entrypoint: ['./entrypoint.sh', 'history']
-    depends_on:
-      - spark-master
-    env_file:
-      - .env.spark
+      - "8080:8080"
+      - "7077:7077"
     volumes:
-      # - ./spark-logs:/opt/spark/spark-events
-      - ./scripts:/opt/spark/scripts
-    ports:
-      - '18080:18080'
+      - ./scripts:/opt/bitnami/spark/scripts
     networks:
       - ProjectHost
 
   spark-worker:
+    image: sobhanebrahimi/spark:0.1
     container_name: spark-worker
-    image: spark-image
-    entrypoint: ['./entrypoint.sh', 'worker']
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - HOME=/tmp
     depends_on:
       - spark-master
-    env_file:
-      - .env.spark
     volumes:
-      # - ./spark-logs:/opt/spark/spark-events
-      - ./scripts:/opt/spark/scripts
+      - ./scripts:/opt/bitnami/spark/scripts
     networks:
       - ProjectHost
 
-volumes:
-  spark-logs:
+  pyspark-job:
+    image: sobhanebrahimi/spark:0.1
+    container_name: pyspark-job
+    depends_on:
+      - spark-master
+      - spark-worker
+    environment:
+      - HOME=/tmp
+    volumes:
+      - ./scripts:/opt/bitnami/spark/scripts
+    command:
+      [
+        "/opt/bitnami/spark/bin/spark-submit",
+        "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+        "--master", "spark://spark-master:7077",  
+        "--jars", "/opt/bitnami/spark/jars/clickhouse-jdbc-0.7.2-all.jar",
+        "/opt/bitnami/spark/scripts/etl.py"      ]
+    networks:
+      - ProjectHost
 
 networks:
   ProjectHost:
     external: true
 
+
+        # "/opt/bitnami/spark/bin/spark-submit",
+        # "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+        # "--master", "spark://spark-master:7077",
+        # "/opt/bitnami/spark/scripts/etl.py"
