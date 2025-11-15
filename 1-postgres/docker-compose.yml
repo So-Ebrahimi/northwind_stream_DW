@@ -2,9 +2,8 @@ version: '3.9'
 
 services:
   postgres:
-    build: .
     container_name: postgres
-    image: my-postgres
+    image: sobhanebrahimi/postgres18-northwind-db:0.1
     environment:
       POSTGRES_DB: northwind
       POSTGRES_USER: postgres
@@ -12,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./data:/var/lib/postgresql
+      - ./postgresql:/var/lib/postgresql/
     networks:
       - ProjectHost
 

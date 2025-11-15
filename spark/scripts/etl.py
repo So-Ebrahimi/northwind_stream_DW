@@ -4,6 +4,11 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 spark = (
     SparkSession.builder
     .appName("KafkaDebeziumClickHouse")
+    .config(
+        "spark.jars.packages",
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
+        "com.clickhouse:clickhouse-jdbc:0.7.2"
+    )    
     .getOrCreate()
 )
 spark.sparkContext.setLogLevel("WARN")
@@ -81,7 +86,7 @@ final_df.writeStream \
                   .option("url", "jdbc:clickhouse://clickhouse1:8123/default")
                   .option("user", "default")
                   .option("password", "123456")
-                  .option("dbtable", "northwind.northwind_region")
+                  .option("dbtable", "northwind.regtest")
                   .mode("append")
                   .save()
                  ) \
