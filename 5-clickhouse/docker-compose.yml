@@ -2,7 +2,8 @@ version: '3'
 
 services:
   clickhouse-zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.1
+    image: sobhanebrahimi/zookeper:0.1
+    container_name: clickhouse-zookeeper
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
       - ZOOKEEPER_CLIENT_PORT=2181
@@ -14,7 +15,7 @@ services:
       - ProjectHost
 
   clickhouse1:
-    image: clickhouse/clickhouse-server
+    image: sobhanebrahimi/clickhouse:0.1 
     container_name: clickhouse1
     user: root
     environment:
@@ -40,7 +41,7 @@ services:
     entrypoint: >
       bash -c "
         /entrypoint.sh &   # start clickhouse server in background
-        sleep 10            # wait for clickhouse server to start
+        sleep 20            # wait for clickhouse server to start
         clickhouse-client --multiquery < /tmp/init-db/init.sql
         wait
       "
@@ -48,7 +49,7 @@ services:
 
 
   clickhouse2:
-    image: clickhouse/clickhouse-server
+    image: sobhanebrahimi/clickhouse:0.1 
     container_name: clickhouse2
     user: root  # نیاز داریم برای اجرای sudo
     environment:
