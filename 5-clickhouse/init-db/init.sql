@@ -1,7 +1,5 @@
--- ایجاد دیتابیس
 CREATE DATABASE IF NOT EXISTS northwind ON CLUSTER replicated_cluster;
 
--- جدول categories
 CREATE TABLE IF NOT EXISTS northwind.northwind_categories
 ON CLUSTER replicated_cluster
 (
@@ -20,7 +18,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY category_id;
 
--- جدول customer_customer_demo
 CREATE TABLE IF NOT EXISTS northwind.northwind_customer_customer_demo
 ON CLUSTER replicated_cluster
 (
@@ -36,7 +33,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY (customer_id, customer_type_id);
 
--- جدول customer_demographics
 CREATE TABLE IF NOT EXISTS northwind.northwind_customer_demographics
 ON CLUSTER replicated_cluster
 (
@@ -52,7 +48,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY customer_type_id;
 
--- جدول customers
 CREATE TABLE IF NOT EXISTS northwind.northwind_customers
 ON CLUSTER replicated_cluster
 (
@@ -77,7 +72,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY customer_id;
 
--- جدول employees
 CREATE TABLE IF NOT EXISTS northwind.northwind_employees
 ON CLUSTER replicated_cluster
 (
@@ -109,7 +103,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY employee_id;
 
--- جدول employee_territories
 CREATE TABLE IF NOT EXISTS northwind.northwind_employee_territories
 ON CLUSTER replicated_cluster
 (
@@ -125,7 +118,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY (employee_id, territory_id);
 
--- جدول order_details
 CREATE TABLE IF NOT EXISTS northwind.northwind_order_details
 ON CLUSTER replicated_cluster
 (
@@ -144,7 +136,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY (order_id, product_id);
 
--- جدول orders
 CREATE TABLE IF NOT EXISTS northwind.northwind_orders
 ON CLUSTER replicated_cluster
 (
@@ -172,7 +163,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY order_id;
 
--- جدول products
 CREATE TABLE IF NOT EXISTS northwind.northwind_products
 ON CLUSTER replicated_cluster
 (
@@ -196,7 +186,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY product_id;
 
--- جدول region
 CREATE TABLE IF NOT EXISTS northwind.northwind_region
 ON CLUSTER replicated_cluster
 (
@@ -212,7 +201,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY region_id;
 
--- جدول shippers
 CREATE TABLE IF NOT EXISTS northwind.northwind_shippers
 ON CLUSTER replicated_cluster
 (
@@ -229,7 +217,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY shipper_id;
 
--- جدول suppliers
 CREATE TABLE IF NOT EXISTS northwind.northwind_suppliers
 ON CLUSTER replicated_cluster
 (
@@ -255,7 +242,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY supplier_id;
 
--- جدول territories
 CREATE TABLE IF NOT EXISTS northwind.northwind_territories
 ON CLUSTER replicated_cluster
 (
@@ -272,7 +258,6 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY territory_id;
 
--- جدول us_states
 CREATE TABLE IF NOT EXISTS northwind.northwind_us_states
 ON CLUSTER replicated_cluster
 (
@@ -290,11 +275,48 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY state_id;
 
--- جدول regtest
-CREATE TABLE IF NOT EXISTS northwind.regtest
+
+
+CREATE TABLE IF NOT EXISTS default.fact_sales
 (
-    id Int32,
-    name Nullable(String)
+    order_id Int16,
+--    order_date DateTime,
+--    shipped_date DateTime,
+    customer_id String,
+    product_id Int16,
+    employee_id Int16,
+    shipper_id Int16,
+    quantity Int16,
+    unit_price Float32,
+    discount Float32,
+    freight Float32,
+    total_amount Float32,
+    operation CHAR(1),
+    updatedate DateTime
 )
-ENGINE = MergeTree()
-ORDER BY id;
+ENGINE = ReplacingMergeTree(updatedate)
+ORDER BY (order_id, product_id);
+
+
+
+CREATE MATERIALIZED VIEW default.mv_fact_sales
+TO default.fact_sales
+AS
+SELECT
+    o.order_id,
+--    parseDateTimeBestEffort(o.order_date) AS order_date,
+--    parseDateTimeBestEffort(o.shipped_date) AS shipped_date,
+    o.customer_id,
+    od.product_id,
+    o.employee_id,
+    o.ship_via AS shipper_id,
+    od.quantity,
+    od.unit_price,
+    od.discount,
+    o.freight,
+    od.unit_price * od.quantity * (1 - od.discount) AS total_amount,
+    o.operation,
+    o.updatedate
+FROM northwind.northwind_orders o
+INNER JOIN northwind.northwind_order_details od
+ON o.order_id = od.order_id;
