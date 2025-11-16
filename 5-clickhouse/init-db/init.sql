@@ -274,49 +274,283 @@ ENGINE = ReplicatedReplacingMergeTree(
      updatedate
 )
 ORDER BY state_id;
+-- ###################################
+-- Northwind Data Warehouse Star Schema
+-- Includes: All Dimensions, Fact Tables, and ETL Materialized Views
 
+CREATE DATABASE IF NOT EXISTS dwh;
+USE dwh;
 
-
-CREATE TABLE IF NOT EXISTS default.fact_sales
-(
-    order_id Int16,
---    order_date DateTime,
---    shipped_date DateTime,
+/* =============================
+   DIMENSION: CUSTOMERS
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_customers (
     customer_id String,
-    product_id Int16,
-    employee_id Int16,
-    shipper_id Int16,
-    quantity Int16,
+    company_name String,
+    contact_name String,
+    contact_title String,
+    city String,
+    region String,
+    country String,
+    phone String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY customer_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_customers
+TO dwh.dim_customers AS
+SELECT
+    customer_id,
+    company_name,
+    contact_name,
+    contact_title,
+    city,
+    region,
+    country,
+    phone,
+    updatedate AS updated_at
+FROM northwind.northwind_customers
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: EMPLOYEES
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_employees (
+    employee_id Int32,
+    full_name String,
+    title String,
+    title_of_courtesy String,
+    city String,
+    region String,
+    country String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY employee_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_employees
+TO dwh.dim_employees AS
+SELECT
+    employee_id,
+    concat(first_name, ' ', last_name) AS full_name,
+    title,
+    title_of_courtesy,
+    city,
+    region,
+    country,
+    updatedate AS updated_at
+FROM northwind.northwind_employees
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: SUPPLIERS
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_suppliers (
+    supplier_id Int32,
+    company_name String,
+    contact_name String,
+    contact_title String,
+    city String,
+    region String,
+    country String,
+    phone String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY supplier_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_suppliers
+TO dwh.dim_suppliers AS
+SELECT
+    supplier_id,
+    company_name,
+    contact_name,
+    contact_title,
+    city,
+    region,
+    country,
+    phone,
+    updatedate AS updated_at
+FROM northwind.northwind_suppliers
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: CATEGORIES
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_categories (
+    category_id Int32,
+    category_name String,
+    description String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY category_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_categories
+TO dwh.dim_categories AS
+SELECT
+    category_id,
+    category_name,
+    description,
+    updatedate AS updated_at
+FROM northwind.northwind_categories
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: PRODUCTS
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_products (
+    product_id Int32,
+    product_name String,
+    category_id Int32,
+    category_name String,
+    supplier_id Int32,
+    supplier_name String,
+    unit_price Float32,
+    discontinued UInt8,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY product_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_products
+TO dwh.dim_products AS
+SELECT
+    p.product_id AS product_id,
+    p.product_name AS product_name,
+    p.category_id AS category_id,
+    c.category_name AS category_name,
+    p.supplier_id AS supplier_id,
+    s.company_name AS supplier_name,
+    p.unit_price AS unit_price,
+    p.discontinued AS discontinued,
+    p.updatedate AS updated_at
+FROM northwind.northwind_products p
+LEFT JOIN northwind.northwind_categories c ON p.category_id = c.category_id
+LEFT JOIN northwind.northwind_suppliers s ON p.supplier_id = s.supplier_id
+WHERE p.operation != 'd';
+
+
+/* =============================
+   DIMENSION: SHIPPERS
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_shippers (
+    shipper_id Int32,
+    company_name String,
+    phone String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY shipper_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_shippers
+TO dwh.dim_shippers AS
+SELECT
+    shipper_id,
+    company_name,
+    phone,
+    updatedate AS updated_at
+FROM northwind.northwind_shippers
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: REGION
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_region (
+    region_id Int32,
+    region_description String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY region_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_region
+TO dwh.dim_region AS
+SELECT
+    region_id,
+    region_description,
+    updatedate AS updated_at
+FROM northwind.northwind_region
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: TERRITORIES
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_territories (
+    territory_id String,
+    territory_description String,
+    region_id Int32,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY territory_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_territories
+TO dwh.dim_territories AS
+SELECT
+    territory_id,
+    territory_description,
+    region_id,
+    updatedate AS updated_at
+FROM northwind.northwind_territories
+WHERE operation != 'd';
+
+/* =============================
+   DIMENSION: US STATES
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.dim_us_states (
+    state_id Int32,
+    state_name String,
+    state_abbr String,
+    state_region String,
+    updated_at DateTime
+) ENGINE = MergeTree()
+ORDER BY state_id;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_dim_us_states
+TO dwh.dim_us_states AS
+SELECT
+    state_id,
+    state_name,
+    state_abbr,
+    state_region,
+    updatedate AS updated_at
+FROM northwind.northwind_us_states
+WHERE operation != 'd';
+
+/* =============================
+   FACT TABLE: ORDER ITEMS
+   ============================= */
+CREATE TABLE IF NOT EXISTS dwh.fact_order_items (
+    order_id Int32,
+    order_date Date,
+    customer_id String,
+    employee_id Int32,
+    product_id Int32,
+    quantity Int32,
     unit_price Float32,
     discount Float32,
-    freight Float32,
-    total_amount Float32,
-    operation CHAR(1),
-    updatedate DateTime
-)
-ENGINE = ReplacingMergeTree(updatedate)
-ORDER BY (order_id, product_id);
+    line_total Float64,
+    ship_country String,
+    ship_city String,
+    ship_via Int32,
+    updated_at DateTime
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(order_date)
+ORDER BY (order_date, order_id, product_id);
 
-
-
-CREATE MATERIALIZED VIEW default.mv_fact_sales
-TO default.fact_sales
-AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS dwh.mv_fact_order_items
+TO dwh.fact_order_items AS
 SELECT
-    o.order_id,
---    parseDateTimeBestEffort(o.order_date) AS order_date,
---    parseDateTimeBestEffort(o.shipped_date) AS shipped_date,
+    d.order_id,
+    o.order_date AS order_date,
     o.customer_id,
-    od.product_id,
-    o.employee_id,
-    o.ship_via AS shipper_id,
-    od.quantity,
-    od.unit_price,
-    od.discount,
-    o.freight,
-    od.unit_price * od.quantity * (1 - od.discount) AS total_amount,
-    o.operation,
-    o.updatedate
-FROM northwind.northwind_orders o
-INNER JOIN northwind.northwind_order_details od
-ON o.order_id = od.order_id;
+    toInt32(o.employee_id) AS employee_id,
+    d.product_id,
+    d.quantity,
+    d.unit_price,
+    d.discount,
+    d.quantity * d.unit_price * (1 - d.discount) AS line_total,
+    o.ship_country,
+    o.ship_city,
+    toInt32(o.ship_via) AS ship_via,
+    d.updatedate AS updated_at
+FROM northwind.northwind_order_details d
+LEFT JOIN northwind.northwind_orders o USING (order_id)
+WHERE d.operation != 'd';
+
+
+
