@@ -13,8 +13,8 @@ services:
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       ENABLE_DEBEZIUM_SCRIPTING: "true"
-    ports:
-      - "8083:8083"
+    # ports:
+    #   - "8083:8083"
     networks:
       - ProjectHost
   register-connector:

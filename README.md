@@ -1,11 +1,7 @@
 # Data-pipeline-for-northwind
 docker network create ProjectHost
-docker-compose -f ./postgres/docker-compose.yml up -d --buld
-docker-compose -f ./kafka/docker-compose.yml up -d
-docker-compose -f ./debezium/docker-compose.yml up -d
-docker-compose -f ./clickhouse/docker-compose.yml up -d
-spark-submit \
-  --master spark://spark-master:7077 \
-  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 \
-  /opt/spark/work-dir/test.py
-/opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0  /opt/spark/scripts/etl.py
+docker-compose -f ./1-postgres/docker-compose.yml up -d 
+docker-compose -f ./3-kafka/docker-compose.yml up -d
+docker-compose -f ./4-debezium/docker-compose.yml up -d
+docker-compose -f ./5-clickhouse/docker-compose.yml up -d
+docker-compose -f ./6-spark/docker-compose.yml up -d
