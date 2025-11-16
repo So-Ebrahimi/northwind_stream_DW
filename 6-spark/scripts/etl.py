@@ -76,21 +76,6 @@ user = "default"
 password = "123456"  
 driver = "com.clickhouse.jdbc.ClickHouseDriver"
 
-# Write DataFrame to ClickHouse
-# df.writeStream \
-#     .foreachBatch(lambda batch_df, batch_id: batch_df.write
-#                   .format("jdbc")
-#                   .option("driver", "com.clickhouse.jdbc.ClickHouseDriver")
-#                   .option("url", "jdbc:clickhouse://clickhouse1:8123/default")
-#                   .option("user", "default")
-#                   .option("password", "123456")
-#                   .option("dbtable", "northwind.regtest")
-#                   .mode("append")
-#                   .save()
-#                  ) \
-#     .outputMode("append") \
-#     .start() \
-#     .awaitTermination()
 
 
 df.write \

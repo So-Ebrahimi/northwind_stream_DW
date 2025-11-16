@@ -3,23 +3,19 @@ from pyspark.sql.functions import col, from_json, get_json_object, when, lit, cu
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
 from norhwind_schemas import * 
 
-spark = (
-    SparkSession.builder
-    .appName("KafkaDebeziumClickHouse")
-    .config("spark.ui.enabled", "false")
-    .config(
-        "spark.jars.packages",
-        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
-        "com.clickhouse:clickhouse-jdbc:0.7.2"
-    )    
+spark = SparkSession.builder \
+    .appName("example") \
+    .master("local") \
     .getOrCreate()
-)
-spark.sparkContext.setLogLevel("WARN")
 
 
-kafka_bootstrap_servers = "localhost:9092"
+spark.sparkContext.setLogLevel("ERROR")
 
-url = "jdbc:clickhouse://localhost:9123/default"
+
+kafka_bootstrap_servers = "kafka:9092"
+
+
+url = "jdbc:ch://clickhouse1:8123/default"
 user = "default" 
 password = "123456"  
 driver = "com.clickhouse.jdbc.ClickHouseDriver"
@@ -45,54 +41,53 @@ def transformDebeziumPayload(parsed_df):
     # Remove tombstone messages
     parsed_df = parsed_df.filter(col("payload").isNotNull())
     
-    # Flatten all fields dynamically from payload
     payload_schema = parsed_df.schema["payload"].dataType
     select_exprs = []
     for f in payload_schema.fields:
         if f.name not in ["__deleted", "__op", "__ts_ms"]:
             select_exprs.append(col(f"payload." + f.name).alias(f.name))
-    # select_exprs = [col(f"payload." + f.name).alias(f.name) for f in payload_schema.fields]
-    
-    # Always include operation and update timestamp
+
     select_exprs += [
         col("payload.__op").alias("operation"),
-        col("payload.__op").alias("updatedate")
+        current_timestamp().alias("updatedate")
     ]
 
     final_df = parsed_df.select(*select_exprs)
     return final_df
+
+
+
 streams = []
+
 for short_name, (table, topic, schema) in table_mapping.items():
-    print(table)
     df = readDataFromTopics(topic, schema)
     transformed_df = transformDebeziumPayload(df)
-    transformed_df.printSchema()
 
-    console_query = transformed_df.writeStream \
-    .outputMode("append") \
-    .format("console") \
-    .option("truncate", False) \
-    .start()
-# همزمان هر دو جریان را اجرا می‌کنیم
+    def foreach_batch(batch_df, batch_id, table_name=table):
+        row_count = batch_df.count()  # تعداد ردیف‌های این batch
+        print(f"Batch {batch_id} for table {table_name}: {row_count} rows updated")
+        
+        batch_df.write \
+            .format("jdbc") \
+            .option("driver", driver) \
+            .option("url", url) \
+            .option("user", user) \
+            .option("password", password) \
+            .option("dbtable", table_name) \
+            .mode("append") \
+            .save()
+
     stream = (
         transformed_df.writeStream
-        .foreachBatch(lambda batch_df, batch_id:
-    batch_df.write \
-        .format("jdbc") \
-        .option("driver", driver) \
-        .option("url", url) \
-        .option("user", user) \
-        .option("password", password) \
-        .option("dbtable", "default.categories")        
-        .mode("append").save())
+        .foreachBatch(foreach_batch)
         .outputMode("append")
+        .option("checkpointLocation", f"/tmp/spark_checkpoints/{table}")  # مسیر checkpoint جدا برای هر جدول
         .start()
     )
-    streams.append(console_query)
 
     streams.append(stream)
 
-# Wait for all streams AFTER the loop
 for stream in streams:
     stream.awaitTermination()
+
     

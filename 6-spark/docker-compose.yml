@@ -51,10 +51,7 @@ services:
     command:
       [
         "/opt/bitnami/spark/bin/spark-submit",
-        "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
-        "--master", "spark://spark-master:7077",  
-        "--jars", "/opt/bitnami/spark/jars/clickhouse-jdbc-0.7.2-all.jar",
-        "/opt/bitnami/spark/scripts/etl.py"      ]
+        "/opt/bitnami/spark/scripts/northwind-etl.py"      ]
     networks:
       - ProjectHost
 
@@ -63,7 +60,3 @@ networks:
     external: true
 
 
-        # "/opt/bitnami/spark/bin/spark-submit",
-        # "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
-        # "--master", "spark://spark-master:7077",
-        # "/opt/bitnami/spark/scripts/etl.py"
