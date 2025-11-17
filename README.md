@@ -1,4 +1,7 @@
 # Data-pipeline-for-northwind
+POSTGRESQL(NORTHWIND OLTP) -> DEBEZIUM -> kafka -> SPARK -> CLICKHOUSE(DW)
+
+
 docker network create ProjectHost
 docker-compose -f ./1-postgres/docker-compose.yml up -d 
 docker-compose -f ./3-kafka/docker-compose.yml up -d
@@ -11,3 +14,45 @@ INSERT INTO order_details VALUES (11079, 7, 30, 1, 0.0500000007);
 INSERT INTO order_details VALUES (11079, 8, 40, 2, 0.100000001);
 INSERT INTO order_details VALUES (11079, 10, 31, 1, 0);
 
+
+
+SELECT DISTINCT
+        Country,
+        Region,
+        City,
+        postal_code ,
+        address 
+FROM
+(
+    -- From Customers
+    SELECT
+        Country,
+        Region,
+        City,
+        postal_code ,
+        address 
+    FROM Customers
+    
+    UNION ALL
+    
+    -- From Suppliers
+    SELECT
+        Country,
+        Region,
+        City,
+        postal_code ,
+        address 
+    FROM Suppliers
+
+    UNION ALL
+    
+    -- From Employees
+    SELECT
+        Country,
+        Region,
+        City,
+        postal_code ,
+        address 
+    FROM Employees
+)
+WHERE Country IS NOT NULL;
