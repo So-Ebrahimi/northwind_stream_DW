@@ -62,32 +62,17 @@ streams = []
 for short_name, (table, topic, schema) in table_mapping.items():
     df = readDataFromTopics(topic, schema)
     transformed_df = transformDebeziumPayload(df)
-
-    def foreach_batch(batch_df, batch_id, table_name=table):
-        row_count = batch_df.count()  # تعداد ردیف‌های این batch
-        print(f"Batch {batch_id} for table {table_name}: {row_count} rows updated")
-        
-        batch_df.write \
-            .format("jdbc") \
-            .option("driver", driver) \
-            .option("url", url) \
-            .option("user", user) \
-            .option("password", password) \
-            .option("dbtable", table_name) \
-            .mode("append") \
-            .save()
-
-    stream = (
-        transformed_df.writeStream
-        .foreachBatch(foreach_batch)
+    query = (
+        df.writeStream
         .outputMode("append")
-        .option("checkpointLocation", f"/tmp/spark_checkpoints/{table}")  # مسیر checkpoint جدا برای هر جدول
+        .format("console")
+        .option("truncate", False)
         .start()
     )
 
-    streams.append(stream)
+
+
+streams.append(query)
 
 for stream in streams:
     stream.awaitTermination()
-
-    

@@ -18,35 +18,35 @@ ENGINE = ReplicatedReplacingMergeTree(
 )
 ORDER BY category_id;
 
-CREATE TABLE IF NOT EXISTS northwind.northwind_customer_customer_demo
-ON CLUSTER replicated_cluster
-(
-    customer_id String,
-    customer_type_id String,
-    operation CHAR(1),
-    updatedate DateTime
-)
-ENGINE = ReplicatedReplacingMergeTree(
-    '/clickhouse/tables/northwind/northwind_customer_customer_demo/{replica}',
-    '{replica}',
-     updatedate
-)
-ORDER BY (customer_id, customer_type_id);
+-- CREATE TABLE IF NOT EXISTS northwind.northwind_customer_customer_demo
+-- ON CLUSTER replicated_cluster
+-- (
+--     customer_id String,
+--     customer_type_id String,
+--     operation CHAR(1),
+--     updatedate DateTime
+-- )
+-- ENGINE = ReplicatedReplacingMergeTree(
+--     '/clickhouse/tables/northwind/northwind_customer_customer_demo/{replica}',
+--     '{replica}',
+--      updatedate
+-- )
+-- ORDER BY (customer_id, customer_type_id);
 
-CREATE TABLE IF NOT EXISTS northwind.northwind_customer_demographics
-ON CLUSTER replicated_cluster
-(
-    customer_type_id String,
-    customer_desc Nullable(String),
-    operation CHAR(1),
-    updatedate DateTime
-)
-ENGINE = ReplicatedReplacingMergeTree(
-    '/clickhouse/tables/northwind/northwind_customer_demographics/{replica}',
-    '{replica}',
-     updatedate
-)
-ORDER BY customer_type_id;
+-- CREATE TABLE IF NOT EXISTS northwind.northwind_customer_demographics
+-- ON CLUSTER replicated_cluster
+-- (
+--     customer_type_id String,
+--     customer_desc Nullable(String),
+--     operation CHAR(1),
+--     updatedate DateTime
+-- )
+-- ENGINE = ReplicatedReplacingMergeTree(
+--     '/clickhouse/tables/northwind/northwind_customer_demographics/{replica}',
+--     '{replica}',
+--      updatedate
+-- )
+-- ORDER BY customer_type_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_customers
 ON CLUSTER replicated_cluster
@@ -80,8 +80,8 @@ ON CLUSTER replicated_cluster
     first_name Nullable(String),
     title Nullable(String),
     title_of_courtesy Nullable(String),
-    birth_date Nullable(Date),
-    hire_date Nullable(Date),
+    birth_date Nullable(DateTime64(3, 'UTC')),
+    hire_date Nullable(DateTime64(3, 'UTC')),
     address Nullable(String),
     city Nullable(String),
     region Nullable(String),
@@ -274,7 +274,4 @@ ENGINE = ReplicatedReplacingMergeTree(
      updatedate
 )
 ORDER BY state_id;
--- ###################################
--- Northwind Data Warehouse Star Schema
--- Includes: All Dimensions, Fact Tables, and ETL Materialized Views
 

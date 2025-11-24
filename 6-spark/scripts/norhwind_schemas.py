@@ -70,8 +70,8 @@ employees_schema = StructType([
     StructField("first_name", StringType(), True),
     StructField("title", StringType(), True),
     StructField("title_of_courtesy", StringType(), True),
-    StructField("birth_date", DateType(), True),
-    StructField("hire_date", DateType(), True),
+    StructField("birth_date", StringType(), True),
+    StructField("hire_date", StringType(), True),
     StructField("address", StringType(), True),
     StructField("city", StringType(), True),
     StructField("region", StringType(), True),
@@ -243,18 +243,18 @@ categories_schema = StructType([
     StructField("__ts_ms", LongType(), True)
 ])
 table_mapping = {
-    "categories": ["northwind.northwind_categories", "northwind.public.categories", categories_schema],
+    # "categories": ["northwind.northwind_categories", "northwind.public.categories", categories_schema],
 ##    "customer_customer_demo": ["northwind.northwind_customer_customer_demo", "northwind.public.customer_customer_demo", customer_customer_demo_schema],
 ##     "customer_demographics": ["northwind.northwind_customer_demographics", "northwind.public.customer_demographics", customer_demographics_schema],
-    "customers": ["northwind.northwind_customers", "northwind.public.customers", customers_schema],
-    "employee_territories": ["northwind.northwind_employee_territories", "northwind.public.employee_territories", employee_territories_schema],
+    # "customers": ["northwind.northwind_customers", "northwind.public.customers", customers_schema],
+    # "employee_territories": ["northwind.northwind_employee_territories", "northwind.public.employee_territories", employee_territories_schema],
     "employees": ["northwind.northwind_employees", "northwind.public.employees", employees_schema],
-    "order_details": ["northwind.northwind_order_details", "northwind.public.order_details", order_details_schema],
-    "orders": ["northwind.northwind_orders", "northwind.public.orders", orders_schema],
-    "products": ["northwind.northwind_products", "northwind.public.products", products_schema],
-    "region": ["northwind.northwind_region", "northwind.public.region", region_schema],
-    "shippers": ["northwind.northwind_shippers", "northwind.public.shippers", shippers_schema],
-    "suppliers": ["northwind.northwind_suppliers", "northwind.public.suppliers", suppliers_schema],
-    "territories": ["northwind.northwind_territories", "northwind.public.territories", territories_schema],
-    "us_states": ["northwind.northwind_us_states", "northwind.public.us_states", us_states_schema]
+    # "order_details": ["northwind.northwind_order_details", "northwind.public.order_details", order_details_schema],
+    # "orders": ["northwind.northwind_orders", "northwind.public.orders", orders_schema],
+    # "products": ["northwind.northwind_products", "northwind.public.products", products_schema],
+    # "region": ["northwind.northwind_region", "northwind.public.region", region_schema],
+    # "shippers": ["northwind.northwind_shippers", "northwind.public.shippers", shippers_schema],
+    # "suppliers": ["northwind.northwind_suppliers", "northwind.public.suppliers", suppliers_schema],
+    # "territories": ["northwind.northwind_territories", "northwind.public.territories", territories_schema],
+    # "us_states": ["northwind.northwind_us_states", "northwind.public.us_states", us_states_schema]
 }

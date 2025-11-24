@@ -7,8 +7,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    # ports:
-    #   - "2181:2181"
+    ports:
+      - "12181:2181"
     networks:
       - ProjectHost
 
@@ -17,9 +17,9 @@ services:
     container_name: kafka
     depends_on:
       - zookeeper
-    # ports:
-    #   - "9092:9092"
-    #   - "29092:29092"
+    ports:
+      - "39092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
