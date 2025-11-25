@@ -2,7 +2,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, get_json_object, when, lit, current_timestamp, struct, to_json
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
 from norhwind_schemas import * 
-from pyspark.sql.functions import expr
+from pyspark.sql.functions import expr, date_format
 spark = SparkSession.builder \
     .appName("example") \
     .master("local") \
@@ -55,11 +55,14 @@ def transformDebeziumPayload(parsed_df):
     final_df = parsed_df.select(*select_exprs)
     return final_df
 
-def transformDate(final_df , dateColumns) :
-    for dateColumn in dateColumns :
-        final_df = final_df.withColumn(dateColumn, expr(f"to_timestamp({dateColumn} * 86400)"))
-    return  final_df
-
+def transformDate(final_df, dateColumns):
+    for dateColumn in dateColumns:
+        final_df = (
+            final_df
+            .withColumn(dateColumn, expr(f"to_timestamp({dateColumn} * 86400)"))
+            .withColumn(dateColumn, date_format(dateColumn, "yyyyMMdd"))
+        )
+    return final_df
 
 streams = []
 
