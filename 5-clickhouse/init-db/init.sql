@@ -10,7 +10,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_categories/{replica}',
     '{replica}',
      updatedate
@@ -26,7 +26,7 @@ ORDER BY category_id;
 --     operation CHAR(1),
 --     updatedate DateTime
 -- )
--- ENGINE = ReplicatedReplacingMergeTree(
+-- ENGINE = ReplicatedMergeTree(
 --     '/clickhouse/tables/northwind/northwind_customer_customer_demo/{replica}',
 --     '{replica}',
 --      updatedate
@@ -41,7 +41,7 @@ ORDER BY category_id;
 --     operation CHAR(1),
 --     updatedate DateTime
 -- )
--- ENGINE = ReplicatedReplacingMergeTree(
+-- ENGINE = ReplicatedMergeTree(
 --     '/clickhouse/tables/northwind/northwind_customer_demographics/{replica}',
 --     '{replica}',
 --      updatedate
@@ -65,7 +65,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_customers/{replica}',
     '{replica}',
      updatedate
@@ -96,7 +96,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_employees/{replica}',
     '{replica}',
      updatedate
@@ -111,7 +111,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_employee_territories/{replica}',
     '{replica}',
      updatedate
@@ -129,7 +129,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_order_details/{replica}',
     '{replica}',
      updatedate
@@ -156,7 +156,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_orders/{replica}',
     '{replica}',
      updatedate
@@ -179,7 +179,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_products/{replica}',
     '{replica}',
      updatedate
@@ -194,7 +194,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_region/{replica}',
     '{replica}',
      updatedate
@@ -210,7 +210,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_shippers/{replica}',
     '{replica}',
      updatedate
@@ -235,7 +235,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_suppliers/{replica}',
     '{replica}',
      updatedate
@@ -251,7 +251,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_territories/{replica}',
     '{replica}',
      updatedate
@@ -268,7 +268,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedReplacingMergeTree(
+ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_us_states/{replica}',
     '{replica}',
      updatedate
