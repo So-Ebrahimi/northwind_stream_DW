@@ -1,169 +1,239 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, current_timestamp, monotonically_increasing_id, year, month, dayofmonth, dayofweek
+from pyspark.sql.functions import *
 from pyspark.sql.types import DateType
+from datetime import date, timedelta
 
-# ---------- Configuration ----------
+# ---------- Setup ----------
 clickhouse_url = "jdbc:ch://clickhouse1:8123/default"
 clickhouse_user = "default"
 clickhouse_password = "123456"
 clickhouse_driver = "com.clickhouse.jdbc.ClickHouseDriver"
 
-# ---------- Spark Setup ----------
 spark = SparkSession.builder \
-    .appName("northwind_star_schema_surrogate_keys") \
+    .appName("northwind_star_schema_exact_model") \
     .master("local[*]") \
     .config("spark.executor.memory", "2g") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("ERROR")
 
-# ---------- Read ClickHouse Table ----------
-def read_ch_table(table_name):
-    return spark.read \
-        .format("jdbc") \
+# ---------- Read CH Tables ----------
+def read_ch(table):
+    return spark.read.format("jdbc") \
         .option("driver", clickhouse_driver) \
         .option("url", clickhouse_url) \
         .option("user", clickhouse_user) \
         .option("password", clickhouse_password) \
-        .option("dbtable", table_name) \
+        .option("dbtable", table) \
         .load()
 
-# ---------- Source Tables ----------
-df_customers = read_ch_table("northwind.northwind_customers")
-df_orders = read_ch_table("northwind.northwind_orders")
-df_order_details = read_ch_table("northwind.northwind_order_details")
-df_products = read_ch_table("northwind.northwind_products")
-df_suppliers = read_ch_table("northwind.northwind_suppliers")
-df_employees = read_ch_table("northwind.northwind_employees")
-df_shippers = read_ch_table("northwind.northwind_shippers")
-df_categories = read_ch_table("northwind.northwind_categories")
+# ---------- Load Source ----------
+df_customers = read_ch("northwind.northwind_customers")
+df_orders = read_ch("northwind.northwind_orders")
+df_order_details = read_ch("northwind.northwind_order_details")
+df_products = read_ch("northwind.northwind_products")
+df_suppliers = read_ch("northwind.northwind_suppliers")
+df_employees = read_ch("northwind.northwind_employees")
+df_shippers = read_ch("northwind.northwind_shippers")
+df_categories = read_ch("northwind.northwind_categories")
+df_employee_territories = read_ch("northwind.northwind_employee_territories")  # mapping
+df_territories_master = read_ch("northwind.northwind_territories")              # details
+df_regions = read_ch("northwind.northwind_region")
 
-# ---------- DimGeography ----------
-geo_customers = df_customers.select("country", "region", "city", "postal_code", "address")
-geo_employees = df_employees.select("country", "region", "city", "postal_code", "address")
+# ============================================================
+# ======================= DimGeography ========================
+# ============================================================
 
-dim_geography = geo_customers.union(geo_employees) \
-    .dropDuplicates(["country", "region", "city", "postal_code", "address"]) \
-    .withColumn("GeographyKey", monotonically_increasing_id()) \
-    .withColumn("StartDate", current_timestamp()) \
-    .withColumn("EndDate", current_timestamp())
-
-# ---------- DimCustomer ----------
-dim_customers = df_customers.join(
-    dim_geography,
-    on=["country", "region", "city", "postal_code", "address"],
-    how="left"
-).select(
-    monotonically_increasing_id().alias("CustomerKey"),
-    col("customer_id").alias("CustomerAlternateKey"),
-    col("GeographyKey"),
-    col("company_name").alias("CompanyName"),
-    col("contact_name").alias("ContactName"),
-    current_timestamp().alias("StartDate"),
-    current_timestamp().alias("EndDate")
+geo_all = (
+    df_customers.select("country", "region", "city", "postal_code", "address")
+    .union(df_employees.select("country", "region", "city", "postal_code", "address"))
 )
 
-# ---------- DimEmployees ----------
-dim_employees = df_employees.join(
-    dim_geography,
+DimGeography = geo_all.dropDuplicates() \
+    .withColumn("GeographyKey", monotonically_increasing_id()) \
+    .select("GeographyKey", "country", "region", "city", "postal_code", "address")
+
+# ============================================================
+# ======================= DimCustomer =========================
+# ============================================================
+
+DimCustomer = df_customers.join(
+    DimGeography,
     on=["country", "region", "city", "postal_code", "address"],
     how="left"
-).select(
-    monotonically_increasing_id().alias("EmployeeKey"),
+).withColumn("CustomerKey", monotonically_increasing_id()) \
+ .select(
+    "CustomerKey",
+    col("customer_id").alias("CustomerAlternateKey"),
+    "GeographyKey",
+    col("company_name").alias("CompanyName"),
+    col("contact_name").alias("ContactName"),
+    col("contact_title").alias("ContactTitle"),
+    "phone",
+    "fax",
+)
+
+# ============================================================
+# ======================= DimEmployees ========================
+# ============================================================
+
+DimEmployees = df_employees.join(
+    DimGeography,
+    on=["country", "region", "city", "postal_code", "address"],
+    how="left"
+).withColumn("EmployeeKey", monotonically_increasing_id()) \
+ .select(
+    "EmployeeKey",
     col("reports_to").alias("ParentEmployeeKey"),
-    col("GeographyKey"),
+    "GeographyKey",
     col("first_name").alias("FirstName"),
     col("last_name").alias("LastName"),
-    col("title").alias("Title"),
-    col("hire_date").alias("HireDate"),
-    current_timestamp().alias("StartDate"),
-    current_timestamp().alias("EndDate")
+    "title",
+    "title_of_courtesy",
+    "birth_date",
+    "hire_date",
+    "home_phone",
+    "extension",
+    "photo",
+    "notes",
+    "photo_path",
 )
 
-# ---------- DimSuppliers ----------
-dim_suppliers = df_suppliers.join(
-    dim_geography,
+# ============================================================
+# ======================= DimSuppliers ========================
+# ============================================================
+
+DimSuppliers = df_suppliers.join(
+    DimGeography,
     on=["country", "region", "city", "postal_code", "address"],
     how="left"
-).select(
-    monotonically_increasing_id().alias("SupplierKey"),
+).withColumn("SupplierKey", monotonically_increasing_id()) \
+ .select(
+    "SupplierKey",
     col("supplier_id").alias("SupplierAlternateKey"),
-    col("GeographyKey"),
-    col("company_name").alias("CompanyName"),
-    col("contact_name").alias("ContactName"),
-    current_timestamp().alias("StartDate"),
-    current_timestamp().alias("EndDate")
+    "GeographyKey",
+    "company_name",
+    "contact_name",
+    "contact_title",
+    "phone",
+    "fax",
+    "homepage",
 )
 
-# ---------- DimProducts ----------
-dim_products = df_products.join(
-    df_categories,
-    on="category_id",
-    how="left"
-).select(
-    monotonically_increasing_id().alias("ProductKey"),
-    col("product_id").alias("ProductAlternateKey"),
-    col("supplier_id").alias("SupplierKey"),
-    col("category_name").alias("CategoryName"),
-    col("unit_price").alias("UnitPrice"),
-    col("units_in_stock").alias("UnitsInStock"),
-    current_timestamp().alias("StartDate"),
-    current_timestamp().alias("EndDate")
-)
+# ============================================================
+# ======================== DimProducts ========================
+# ============================================================
 
-# ---------- DimShippers ----------
-dim_shippers = df_shippers.select(
-    monotonically_increasing_id().alias("ShipperKey"),
-    col("shipper_id").alias("ShipperAlternateKey"),
-    col("company_name").alias("CompanyName"),
-    col("phone").alias("Phone")
-)
-
-# ---------- DimDate ----------
-dim_date = df_orders.select(
-    col("order_date").cast(DateType()).alias("FullDate")
-).dropDuplicates(["FullDate"]) \
-    .withColumn("DateKey", monotonically_increasing_id()) \
-    .withColumn("FullDateAlternateKey", col("FullDate")) \
-    .withColumn("CalendarYear", year(col("FullDate"))) \
-    .withColumn("MonthNumber", month(col("FullDate"))) \
-    .withColumn("DayNumber", dayofmonth(col("FullDate"))) \
-    .withColumn("DayOfWeek", dayofweek(col("FullDate")))
-
-# ---------- DimTerritories (example, using regions from geography) ----------
-dim_territories = dim_geography.select(
-    monotonically_increasing_id().alias("TerritoryKey"),
-    col("region").alias("RegionDescription"),
-    current_timestamp().alias("StartDate"),
-    current_timestamp().alias("EndDate")
-)
-
-# ---------- FactOrders ----------
-# Join fact_orders to surrogate keys
-fact_orders = df_order_details.join(df_orders, on="order_id") \
-    .join(dim_customers, df_orders.customer_id == dim_customers.CustomerAlternateKey) \
-    .join(dim_employees, df_orders.employee_id == dim_employees.EmployeeKey, how="left") \
-    .join(dim_products, df_order_details.product_id == dim_products.ProductAlternateKey) \
-    .join(dim_shippers, df_orders.ship_via == dim_shippers.ShipperAlternateKey, how="left") \
+DimProducts = df_products.join(df_categories, "category_id", "left") \
+    .withColumn("ProductKey", monotonically_increasing_id()) \
     .select(
-        col("order_id").alias("OrderKey"),
-        col("CustomerKey"),
-        col("EmployeeKey"),
-        col("ProductKey"),
-        col("ShipperKey"),
-        col("order_date").alias("OrderDate"),
-        col("quantity"),
-        col("unit_price"),
-        (col("quantity") * col("unit_price")).alias("TotalAmount")
+        "ProductKey",
+        col("product_id").alias("ProductAlternateKey"),
+        col("supplier_id").alias("SupplierKey"),
+        col("product_name").alias("ProductName"),
+        col("category_name").alias("CategoryName"),
+        "quantity_per_unit",
+        "unit_price",
+        "units_in_stock",
+        "units_on_order",
+        "reorder_level",
+        "discontinued",
     )
 
-# ---------- Show Tables ----------
-dim_customers.show(5, truncate=False)
-dim_employees.show(5, truncate=False)
-dim_suppliers.show(5, truncate=False)
-dim_products.show(5, truncate=False)
-dim_shippers.show(5, truncate=False)
-dim_geography.show(5, truncate=False)
-dim_date.show(5, truncate=False)
-dim_territories.show(5, truncate=False)
-fact_orders.show(5, truncate=False)
+# ============================================================
+# ======================== DimShippers ========================
+# ============================================================
+
+DimShippers = df_shippers.withColumn("ShipperKey", monotonically_increasing_id()) \
+    .select(
+        "ShipperKey",
+        col("shipper_id").alias("ShipperAlternateKey"),
+        "company_name",
+        "phone"
+    )
+
+# ============================================================
+# ========================== DimDate ==========================
+# ============================================================
+
+start_date = date(2020, 1, 1)
+end_date = date(2025, 12, 31)
+dates = []
+current = start_date
+while current <= end_date:
+    dates.append((current,))
+    current += timedelta(days=1)
+
+DimDate = spark.createDataFrame(dates, ["FullDate"]) \
+    .withColumn("DateKey", date_format("FullDate", "yyyyMMdd").cast("int")) \
+    .withColumn("FullDateAlternateKey", col("FullDate")) \
+    .withColumn("CalendarYear", year("FullDate")) \
+    .withColumn("MonthNumberOfYear", month("FullDate")) \
+    .withColumn("DayNumberOfMonth", dayofmonth("FullDate")) \
+    .withColumn("DayOfWeekName", date_format("FullDate", "EEEE"))
+
+# ============================================================
+# ======================= DimTerritories ======================
+# ============================================================
+
+DimTerritories = df_territories_master.withColumn("TerritoryKey", monotonically_increasing_id()) \
+    .select(
+        current_timestamp().alias("StartDate"),
+        current_timestamp().alias("EndDate"),
+        col("territory_description").alias("TerritoryDescription"),
+        col("territory_id").alias("TerritoryAlternateKey"),
+        col("TerritoryKey")
+    )
+
+# ============================================================
+# ================== FactEmployeeTerritories ==================
+# ============================================================
+
+FactEmployeeTerritories = df_employee_territories.alias("fet") \
+    .join(DimEmployees.alias("e"), col("fet.employee_id") == col("e.EmployeeKey"), "left") \
+    .join(DimTerritories.alias("t"), col("fet.territory_id") == col("t.TerritoryAlternateKey"), "left") \
+    .select(
+        col("e.EmployeeKey"),
+        col("t.TerritoryKey")
+    )
+
+# ============================================================
+# ========================== FactOrders =======================
+# ============================================================
+
+FactOrders = df_order_details.alias("od").join(df_orders.alias("o"), "order_id") \
+    .join(DimCustomer.alias("c"), col("o.customer_id") == col("c.CustomerAlternateKey")) \
+    .join(DimEmployees.alias("e"), col("o.employee_id") == col("e.EmployeeKey"), "left") \
+    .join(DimProducts.alias("p"), col("od.product_id") == col("p.ProductAlternateKey")) \
+    .join(DimShippers.alias("s"), col("o.ship_via") == col("s.ShipperAlternateKey"), "left") \
+    .join(DimDate.alias("d"), col("o.order_date") == col("d.DateKey"), "left") \
+    .select(
+        monotonically_increasing_id().alias("OrderID"),
+        col("o.order_date").alias("order_date"),
+        col("o.required_date").alias("required_date"),
+        col("o.shipped_date").alias("shipped_date"),
+        col("c.CustomerKey"),
+        col("e.EmployeeKey"),
+        col("p.ProductKey"),
+        col("s.ShipperKey"),
+        col("o.order_id").alias("OrderAlternateKey"),
+        col("od.quantity"),
+        col("od.unit_price"),  
+        (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
+        col("o.freight")
+    )
+
+# ============================================================
+# ================== Show Tables (Preview) ====================
+# ============================================================
+
+DimGeography.show(5, truncate=False)
+DimCustomer.show(5, truncate=False)
+DimEmployees.show(5, truncate=False)
+DimSuppliers.show(5, truncate=False)
+DimShippers.show(5, truncate=False)
+DimProducts.show(5, truncate=False)
+DimDate.show(5, truncate=False)
+DimTerritories.show(5, truncate=False)
+FactEmployeeTerritories.show(5, truncate=False)
+FactOrders.show(5, truncate=False)

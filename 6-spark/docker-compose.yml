@@ -51,7 +51,7 @@ services:
     command:
       [
         "/opt/bitnami/spark/bin/spark-submit",
-        "/opt/bitnami/spark/scripts/northwind-ch-stg.py"      ]
+        "/opt/bitnami/spark/scripts/northwind-dw.py"      ]
     networks:
       - ProjectHost
 
