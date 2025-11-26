@@ -1,265 +1,314 @@
+# incremental_etl.py
+import os
+from datetime import datetime, timedelta
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
-from pyspark.sql.types import DateType
-from datetime import date, timedelta
-from pyspark.sql.window import Window
+from pyspark.sql.types import TimestampType
+import time 
 
-# ---------- Setup ----------
-clickhouse_url = "jdbc:ch://clickhouse1:8123/default"
-clickhouse_user = "default"
-clickhouse_password = "123456"
-clickhouse_driver = "com.clickhouse.jdbc.ClickHouseDriver"
+# ------------- config -------------
+CLICKHOUSE_URL = "jdbc:ch://clickhouse1:8123/default"
+CLICKHOUSE_USER = "default"
+CLICKHOUSE_PASS = "123456"
+CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver"
+
+LAST_RUN_FILE = "last_run.txt"   # فایل ذخیره زمان آخرین اجرا
+POLL_INTERVAL_SEC = 20          # اگر می‌خوای خودت اسکریپت رو loop کنی (پیشنهاد: cron یا scheduler)
+# ----------------------------------
 
 spark = SparkSession.builder \
-    .appName("northwind_star_schema_exact_model") \
+    .appName("northwind_incremental_etl") \
     .master("local[*]") \
     .config("spark.executor.memory", "2g") \
     .getOrCreate()
-
 spark.sparkContext.setLogLevel("ERROR")
 
-# ---------- Read CH Tables ----------
-def read_ch(table):
-    return spark.read.format("jdbc") \
-        .option("driver", clickhouse_driver) \
-        .option("url", clickhouse_url) \
-        .option("user", clickhouse_user) \
-        .option("password", clickhouse_password) \
-        .option("dbtable", table) \
-        .load()
+def read_ch_table(table, where_clause=None):
+    reader = spark.read.format("jdbc") \
+        .option("driver", CLICKHOUSE_DRIVER) \
+        .option("url", CLICKHOUSE_URL) \
+        .option("user", CLICKHOUSE_USER) \
+        .option("password", CLICKHOUSE_PASS) \
+        .option("dbtable", table)
+    if where_clause:
+        # use subquery to apply WHERE when driver needs
+        sql = f"(SELECT * FROM {table} WHERE {where_clause}) as t"
+        reader = reader.option("dbtable", sql)
+    return reader.load()
 
-# ---------- Load Source ----------
-df_customers = read_ch("northwind.northwind_customers")
-df_orders = read_ch("northwind.northwind_orders")
-df_order_details = read_ch("northwind.northwind_order_details")
-df_products = read_ch("northwind.northwind_products")
-df_suppliers = read_ch("northwind.northwind_suppliers")
-df_employees = read_ch("northwind.northwind_employees")
-df_shippers = read_ch("northwind.northwind_shippers")
-df_categories = read_ch("northwind.northwind_categories")
-df_employee_territories = read_ch("northwind.northwind_employee_territories")
-df_territories_master = read_ch("northwind.northwind_territories")
-df_regions = read_ch("northwind.northwind_region")
+def write_ch_table(df, table_name, mode="append"):
+    df.write.format("jdbc") \
+        .option("driver", CLICKHOUSE_DRIVER) \
+        .option("url", CLICKHOUSE_URL) \
+        .option("user", CLICKHOUSE_USER) \
+        .option("password", CLICKHOUSE_PASS) \
+        .option("dbtable", table_name) \
+        .mode(mode) \
+        .save()
 
-# ============================================================
-# ======================= DimGeography =======================
-# ============================================================
-from pyspark.sql.functions import coalesce, lit
+def get_last_run():
+    if not os.path.exists(LAST_RUN_FILE):
+        # اولین اجرا: یک بازه کوتاه قبل تا همه رکوردها را نگیریم (یا می‌توان full load انجام داد)
+        start = (datetime.utcnow() - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
+        return start
+    with open(LAST_RUN_FILE, "r") as f:
+        return f.read().strip()
 
-def clean_geo(df):
-    return df.withColumn("country", coalesce("country", lit("Unknown"))) \
-             .withColumn("region", coalesce("region", lit("Unknown"))) \
-             .withColumn("city", coalesce("city", lit("Unknown"))) \
-             .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-             .withColumn("address", coalesce("address", lit("Unknown")))
+def set_last_run(ts):
+    with open(LAST_RUN_FILE, "w") as f:
+        f.write(ts)
 
-df_customers = clean_geo(df_customers)
-df_employees = clean_geo(df_employees)
-df_suppliers = clean_geo(df_suppliers)
+# ---------------- transformations for dimensions ----------------
+def process_dim_customers(last_run):
+    where = f"updatedate > toDateTime('{last_run}')"  # فرض: updatedate از نوع DateTime در ClickHouse
+    df_changed = read_ch_table("northwind.northwind_customers", where)
+    if df_changed.rdd.isEmpty():
+        print("DimCustomer: no changes")
+        return
+    # clean geo like in original code
+    from pyspark.sql.functions import coalesce, lit
+    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                           .withColumn("region", coalesce("region", lit("Unknown"))) \
+                           .withColumn("city", coalesce("city", lit("Unknown"))) \
+                           .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                           .withColumn("address", coalesce("address", lit("Unknown")))
+    # build geography rows (we will write new geography rows too)
+    geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
+    # assign GeographyKey (here: we upsert by writing full rows to DimGeography; using Replace strategy in CH)
+    geo_out = geo.withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+    write_ch_table(geo_out.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+
+    # join to generate dimensional customer rows
+    # read existing DimGeography (to resolve keys) - could instead compute same hash
+    dim_geo = geo_out.select("GeographyKey","country","region","city","postal_code","address")
+    dim_customer = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
+        .withColumn("CustomerKey", expr("hash(customer_id)")) \
+        .withColumnRenamed("customer_id","CustomerAlternateKey") \
+        .select(
+            col("CustomerKey").cast("long"),
+            col("CustomerAlternateKey"),
+            col("GeographyKey").cast("long"),
+            col("company_name").alias("CompanyName"),
+            col("contact_name").alias("ContactName"),
+            col("contact_title").alias("ContactTitle"),
+            col("phone"),
+            col("fax"),
+            col("updatedate").alias("updatedate")
+        )
+    # write: append. ClickHouse table should be ReplacingMergeTree(updatedate) and ORDER BY CustomerAlternateKey
+    write_ch_table(dim_customer, "DimCustomer")
+    print(f"DimCustomer: wrote {dim_customer.count()} rows")
+
+def process_dim_employees(last_run):
+    where = f"updatedate > toDateTime('{last_run}')"
+    df_changed = read_ch_table("northwind.northwind_employees", where)
+    if df_changed.rdd.isEmpty():
+        print("DimEmployees: no changes")
+        return
+    from pyspark.sql.functions import coalesce, lit
+    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                           .withColumn("region", coalesce("region", lit("Unknown"))) \
+                           .withColumn("city", coalesce("city", lit("Unknown"))) \
+                           .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                           .withColumn("address", coalesce("address", lit("Unknown")))
+    dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
+                        .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+    write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+
+    dim_emp = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
+        .withColumn("EmployeeKey", expr("hash(employee_id)")) \
+        .withColumnRenamed("employee_id","EmployeeAlternateKey") \
+        .withColumnRenamed("reports_to","ParentEmployeeKey") \
+        .select(
+            col("EmployeeKey").cast("long"),
+            col("EmployeeAlternateKey"),
+            col("ParentEmployeeKey"),
+            col("GeographyKey").cast("long"),
+            col("first_name").alias("FirstName"),
+            col("last_name").alias("LastName"),
+            col("title"),
+            col("title_of_courtesy"),
+            col("birth_date"),
+            col("hire_date"),
+            col("home_phone"),
+            col("extension"),
+            col("photo"),
+            col("notes"),
+            col("photo_path"),
+            col("updatedate").alias("updatedate")
+        )
+    write_ch_table(dim_emp, "DimEmployees")
+    print(f"DimEmployees: wrote {dim_emp.count()} rows")
+
+def process_dim_suppliers(last_run):
+    where = f"updatedate > toDateTime('{last_run}')"
+    df_changed = read_ch_table("northwind.northwind_suppliers", where)
+    if df_changed.rdd.isEmpty():
+        print("DimSuppliers: no changes")
+        return
+    from pyspark.sql.functions import coalesce, lit
+    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                           .withColumn("region", coalesce("region", lit("Unknown"))) \
+                           .withColumn("city", coalesce("city", lit("Unknown"))) \
+                           .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                           .withColumn("address", coalesce("address", lit("Unknown")))
+    dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
+                        .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+    write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+
+    dim_sup = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
+        .withColumn("SupplierKey", expr("hash(supplier_id)")) \
+        .withColumnRenamed("supplier_id","SupplierAlternateKey") \
+        .select(
+            col("SupplierKey").cast("long"),
+            col("SupplierAlternateKey"),
+            col("GeographyKey").cast("long"),
+            col("company_name"),
+            col("contact_name"),
+            col("contact_title"),
+            col("phone"),
+            col("fax"),
+            col("homepage"),
+            col("updatedate").alias("updatedate")
+        )
+    write_ch_table(dim_sup, "DimSuppliers")
+    print(f"DimSuppliers: wrote {dim_sup.count()} rows")
+
+def process_dim_products(last_run):
+    where = f"p.updatedate > toDateTime('{last_run}')"
+    # need join with categories and suppliers - we'll read changed products and join full categories/suppliers
+    df_changed = read_ch_table("northwind.northwind_products p", where)
+    if df_changed.rdd.isEmpty():
+        print("DimProducts: no changes")
+        return
+    # read categories and suppliers full (they are small)
+    categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
+    suppliers = read_ch_table("northwind.northwind_suppliers").select(col("supplier_id").alias("SupplierAlternateKey"))
+    dim_products = df_changed.join(categories, "category_id", "left") \
+        .withColumn("ProductKey", expr("hash(product_id)")) \
+        .withColumnRenamed("product_id","ProductAlternateKey") \
+        .withColumnRenamed("product_name","ProductName") \
+        .select(
+            col("ProductKey").cast("long"),
+            col("ProductAlternateKey"),
+            lit(None).cast("long").alias("SupplierKey"),   # supplierKey resolution could be improved by mapping supplier_id to SupplierKey table
+            col("ProductName"),
+            col("category_name").alias("CategoryName"),
+            "quantity_per_unit",
+            "unit_price",
+            "units_in_stock",
+            "units_on_order",
+            "reorder_level",
+            "discontinued",
+            col("updatedate").alias("updatedate")
+        )
+    write_ch_table(dim_products, "DimProducts")
+    print(f"DimProducts: wrote {dim_products.count()} rows")
+
+def process_dim_shippers(last_run):
+    where = f"updatedate > toDateTime('{last_run}')"
+    df_changed = read_ch_table("northwind.northwind_shippers", where)
+    if df_changed.rdd.isEmpty():
+        print("DimShippers: no changes")
+        return
+    dim_shippers = df_changed.withColumn("ShipperKey", expr("hash(shipper_id)")) \
+        .withColumnRenamed("shipper_id","ShipperAlternateKey") \
+        .select(
+            col("ShipperKey").cast("long"),
+            col("ShipperAlternateKey"),
+            col("company_name"),
+            col("phone"),
+            col("updatedate").alias("updatedate")
+        )
+    write_ch_table(dim_shippers, "DimShippers")
+    print(f"DimShippers: wrote {dim_shippers.count()} rows")
+
+# ---------------- Fact processing ----------------
+def process_fact_orders(last_run):
+    # 1) find all order_ids changed in orders or order_details since last_run
+    where_o = f"updatedate > toDateTime('{last_run}')"
+    where_od = f"updatedate > toDateTime('{last_run}')"
+    orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
+    ods_changed = read_ch_table("northwind.northwind_order_details", where_od).select("order_id").distinct()
+    changed_order_ids = orders_changed.union(ods_changed).distinct()
+    if changed_order_ids.rdd.isEmpty():
+        print("FactOrders: no changed orders")
+        return
+
+    changed_ids_list = [r["order_id"] for r in changed_order_ids.collect()]
+    print(f"FactOrders: rebuilding for {len(changed_ids_list)} orders (sample: {changed_ids_list[:5]})")
+
+    # 2) read the full orders and order_details for those ids
+    ids_csv = ",".join(str(i) for i in changed_ids_list)
+    where_full_orders = f"order_id IN ({ids_csv})"
+    orders_df = read_ch_table("northwind.northwind_orders", where_full_orders).alias("o")
+    od_df = read_ch_table("northwind.northwind_order_details", where_full_orders).alias("od")
+
+    # 3) read dimension keys from built dimensions (we assume DimCustomer/DimEmployees/DimProducts/DimShippers are already populated)
+    dim_customer = read_ch_table("DimCustomer").select(col("CustomerAlternateKey"), col("CustomerKey"))
+    dim_emp = read_ch_table("DimEmployees").select(col("EmployeeAlternateKey"), col("EmployeeKey"))
+    dim_prod = read_ch_table("DimProducts").select(col("ProductAlternateKey"), col("ProductKey"))
+    dim_ship = read_ch_table("DimShippers").select(col("ShipperAlternateKey"), col("ShipperKey"))
+
+    od = od_df.alias("od")
+    o = orders_df.alias("o")
+    c = dim_customer.alias("c")
+    e = dim_emp.alias("e")
+    p = dim_prod.alias("p")
+    s = dim_ship.alias("s")     
+
+    fact = od.join(o, "order_id") \
+        .join(c, o.customer_id == c.CustomerAlternateKey, "left") \
+        .join(e, o.employee_id == e.EmployeeAlternateKey, "left") \
+        .join(p, od.product_id == p.ProductAlternateKey, "left") \
+        .join(s, o.ship_via == s.ShipperAlternateKey, "left") \
+        .withColumn("FactOrderKey", expr("hash(order_id, product_id)").cast("long")) \
+        .select(
+            col("FactOrderKey"),
+            col("o.order_id").alias("OrderAlternateKey"),
+            col("c.CustomerKey"),
+            col("e.EmployeeKey"),
+            col("p.ProductKey"),
+            col("s.ShipperKey"),
+            col("o.order_date").alias("OrderDate"),
+            col("o.required_date").alias("DueDate"),
+            col("o.shipped_date").alias("ShipDate"),
+            col("od.quantity").alias("Quantity"),
+            col("od.unit_price").alias("UnitPrice"),
+            (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
+            col("o.freight").alias("Freight"),
+            col("o.updatedate").alias("updatedate")
+        )
 
 
-geo_all = (
-    df_customers.select("country", "region", "city", "postal_code", "address")
-    .union(df_employees.select("country", "region", "city", "postal_code", "address"))
-    .union(df_suppliers.select("country", "region", "city", "postal_code", "address"))
-)
+    # 5) write fact rows (append). ClickHouse table FactOrders should be ReplacingMergeTree(updatedate) with ORDER BY (OrderAlternateKey, ProductKey) or similar
+    write_ch_table(fact, "FactOrders")
+    print(f"FactOrders: wrote {fact.count()} rows")
 
+# ---------------- main run ----------------
+def main_once():
+    last_run = get_last_run()
+    print("last_run =", last_run)
+    now_ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
+    # process dimensions (only those with updatedate)
+    process_dim_customers(last_run)
+    process_dim_employees(last_run)
+    process_dim_suppliers(last_run)
+    process_dim_products(last_run)
+    process_dim_shippers(last_run)
+    # other dims (categories, territories) if you want can be added similarly
 
-DimGeography = geo_all.dropDuplicates() \
-    .withColumn("GeographyKey", monotonically_increasing_id()) \
-    .select("GeographyKey", "country", "region", "city", "postal_code", "address")
+    # process facts
+    process_fact_orders(last_run)
 
-# ============================================================
-# ======================= DimCustomer ========================
-# ============================================================
-DimCustomer = df_customers.join(
-    DimGeography,
-    on=["country", "region", "city", "postal_code", "address"],
-    how="left"
-).withColumn("CustomerKey", monotonically_increasing_id()) \
- .select(
-    "CustomerKey",
-    col("customer_id").alias("CustomerAlternateKey"),
-    "GeographyKey",
-    col("company_name").alias("CompanyName"),
-    col("contact_name").alias("ContactName"),
-    col("contact_title").alias("ContactTitle"),
-    "phone",
-    "fax",
-)
+    # update last_run only after successful processing
+    set_last_run(now_ts)
+    print("Updated last_run ->", now_ts)
 
-# ============================================================
-# ======================= DimEmployees =======================
-# ============================================================
-DimEmployees = df_employees.join(
-    DimGeography,
-    on=["country", "region", "city", "postal_code", "address"],
-    how="left"
-).withColumn("EmployeeKey", monotonically_increasing_id()) \
- .select(
-    "EmployeeKey",
-    col("employee_id").alias("EmployeeAlternateKey"),
-    col("reports_to").alias("ParentEmployeeKey"),
-    "GeographyKey",
-    col("first_name").alias("FirstName"),
-    col("last_name").alias("LastName"),
-    "title",
-    "title_of_courtesy",
-    "birth_date",
-    "hire_date",
-    "home_phone",
-    "extension",
-    "photo",
-    "notes",
-    "photo_path",
-)
-
-# ============================================================
-# ======================= DimSuppliers =======================
-# ============================================================
-DimSuppliers = df_suppliers.join(
-    DimGeography,
-    on=["country", "region", "city", "postal_code", "address"],
-    how="left"
-).withColumn("SupplierKey", monotonically_increasing_id()) \
- .select(
-    "SupplierKey",
-    col("supplier_id").alias("SupplierAlternateKey"),
-    "GeographyKey",
-    "company_name",
-    "contact_name",
-    "contact_title",
-    "phone",
-    "fax",
-    "homepage",
-)
-# ============================================================
-# ========================== DimDate ==========================
-# ============================================================
-
-start_date = date(1970, 1, 1)
-end_date = date(2050, 12, 31)
-dates = []
-current = start_date
-while current <= end_date:
-    dates.append((current,))
-    current += timedelta(days=1)
-
-DimDate = spark.createDataFrame(dates, ["FullDate"]) \
-    .withColumn("DateKey", date_format("FullDate", "yyyyMMdd").cast("int")) \
-    .withColumn("FullDateAlternateKey", col("FullDate")) \
-    .withColumn("CalendarYear", year("FullDate")) \
-    .withColumn("MonthNumberOfYear", month("FullDate")) \
-    .withColumn("DayNumberOfMonth", dayofmonth("FullDate")) \
-    .withColumn("DayOfWeekName", date_format("FullDate", "EEEE"))
-
-# ============================================================
-# ======================== DimProducts =======================
-# ============================================================
-DimProducts = df_products.join(df_categories, "category_id", "left") \
-    .join(DimSuppliers.select("SupplierKey", "SupplierAlternateKey"),
-          df_products.supplier_id == col("SupplierAlternateKey"), "left") \
-    .withColumn("ProductKey", monotonically_increasing_id()) \
-    .select(
-        "ProductKey",
-        col("product_id").alias("ProductAlternateKey"),
-        "SupplierKey",
-        col("product_name").alias("ProductName"),
-        col("category_name").alias("CategoryName"),
-        "quantity_per_unit",
-        "unit_price",
-        "units_in_stock",
-        "units_on_order",
-        "reorder_level",
-        "discontinued",
-    )
-
-# ============================================================
-# ======================== DimShippers ======================
-# ============================================================
-DimShippers = df_shippers.withColumn("ShipperKey", monotonically_increasing_id()) \
-    .select(
-        "ShipperKey",
-        col("shipper_id").alias("ShipperAlternateKey"),
-        "company_name",
-        "phone"
-    )
-
-# ============================================================
-# ========================== DimTerritories =================
-# ============================================================
-DimTerritories = df_territories_master.withColumn("TerritoryKey", monotonically_increasing_id()) \
-    .select(
-        col("TerritoryKey"),
-        col("territory_id").alias("TerritoryAlternateKey"),
-        col("territory_description").alias("TerritoryDescription"),
-        current_timestamp().alias("StartDate"),
-        current_timestamp().alias("EndDate")
-    )
-
-# ============================================================
-# ================== FactEmployeeTerritories =================
-# ============================================================
-FactEmployeeTerritories = df_employee_territories.alias("fet") \
-    .join(DimEmployees.alias("e"), col("fet.employee_id") == col("e.EmployeeAlternateKey"), "left") \
-    .join(DimTerritories.alias("t"), col("fet.territory_id") == col("t.TerritoryAlternateKey"), "left") \
-    .select(
-        col("e.EmployeeKey"),
-        col("t.TerritoryKey")
-    )
-
-# ============================================================
-# ========================== FactOrders =====================
-# ============================================================
-FactOrders = df_order_details.alias("od").join(df_orders.alias("o"), "order_id") \
-    .join(DimCustomer.alias("c"), col("o.customer_id") == col("c.CustomerAlternateKey")) \
-    .join(DimEmployees.alias("e"), col("o.employee_id") == col("e.EmployeeAlternateKey"), "left") \
-    .join(DimProducts.alias("p"), col("od.product_id") == col("p.ProductAlternateKey"), "left") \
-    .join(DimShippers.alias("s"), col("o.ship_via") == col("s.ShipperAlternateKey"), "left") \
-    .join(DimDate.alias("d"), col("o.order_date") == col("d.DateKey"), "left") \
-    .select(
-        monotonically_increasing_id().alias("FactOrderKey"),
-        col("o.order_date").alias("order_date"),
-        col("o.required_date").alias("required_date"),
-        col("o.shipped_date").alias("shipped_date"),
-        col("c.CustomerKey"),
-        col("e.EmployeeKey"),
-        col("p.ProductKey"),
-        col("s.ShipperKey"),
-        col("o.order_id").alias("OrderAlternateKey"),
-        col("od.quantity"),
-        col("od.unit_price"),  
-        (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
-        col("o.freight")
-    )
-
-# ============================================================
-# ================== Show Tables (Preview) ==================
-# ============================================================
-DimGeography.show(5, truncate=False)
-DimCustomer.show(5, truncate=False)
-DimEmployees.show(5, truncate=False)
-DimSuppliers.show(5, truncate=False)
-DimShippers.show(6, truncate=False)
-DimProducts.show(5, truncate=False)
-DimDate.show(5, truncate=False)
-DimTerritories.show(5, truncate=False)
-FactEmployeeTerritories.show(5, truncate=False)
-FactOrders.show(5, truncate=False)
-
-# print("================================================")
-# print("==============   ROW COUNTS   ==================")
-# print("================================================")
-
-# print("DimGeography:", DimGeography.count())
-# print("DimCustomer:", DimCustomer.count())
-# print("DimEmployees:", DimEmployees.count())
-# print("DimSuppliers:", DimSuppliers.count())
-# print("DimShippers:", DimShippers.count())
-# print("DimProducts:", DimProducts.count())
-# print("DimDate:", DimDate.count())
-# print("DimTerritories:", DimTerritories.count())
-# print("FactEmployeeTerritories:", FactEmployeeTerritories.count())
-# print("FactOrders:", FactOrders.count())
-
+if __name__ == "__main__":
+    # main_once()
+    # Optionally: run in a loop (or schedule via cron/systemd)
+    while True:
+        main_once()
+        time.sleep(POLL_INTERVAL_SEC)

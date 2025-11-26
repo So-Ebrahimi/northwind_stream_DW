@@ -198,3 +198,70 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 ## License
 
 See [LICENSE](LICENSE) file for details.
+
+## Todo List
+
+### Code Quality
+- [ ] Fix typo in schema file: Rename `norhwind_schemas.py` to `northwind_schemas.py` (typo: norhwind → northwind)
+- [ ] Standardize date handling: Review and fix date transformation logic in `northwind-ch-stg.py` - currently only handles employees and orders, should handle all date columns consistently
+- [ ] Fix SupplierKey mapping: In `northwind-dw.py` `process_dim_products()`, SupplierKey is set to NULL - need to properly map supplier_id to SupplierKey from DimSuppliers
+- [ ] Add error handling: Implement comprehensive try-catch blocks and error logging in both Spark jobs (`northwind-ch-stg.py` and `northwind-dw.py`)
+- [ ] Fix employee_id type mismatch: In `northwind-dw.py` `process_fact_orders()`, orders.employee_id is String but DimEmployees.EmployeeAlternateKey expects Integer - add type conversion
+- [ ] Remove hardcoded credentials: Move ClickHouse credentials (user, password) to environment variables or secrets management
+- [ ] Add data validation: Implement data quality checks before writing to ClickHouse (null checks, type validation, referential integrity)
+- [ ] Fix last_run file persistence: In `northwind-dw.py`, `last_run.txt` is stored locally - should use shared storage or database for multi-instance deployments
+
+### Architecture
+- [ ] Implement FactEmployeeTerritories: Create ETL process for FactEmployeeTerritories fact table (currently missing from `northwind-dw.py`)
+- [ ] Add DimDate dimension: Create and populate DimDate dimension table (1970-2050) as mentioned in README but not implemented
+- [ ] Add DimTerritories dimension: Implement DimTerritories dimension table processing in ETL pipeline
+- [ ] Handle DELETE operations: Review CDC delete handling - currently using ReplacingMergeTree but need to verify DELETE operations are properly processed
+- [ ] Implement proper CDC operation handling: In `northwind-ch-stg.py`, operation field is captured but not used - need to handle INSERT/UPDATE/DELETE differently
+
+### Monitoring
+- [ ] Add monitoring and alerting: Implement health checks, metrics collection, and alerting for Spark jobs, Kafka topics, and ClickHouse
+- [ ] Add data quality monitoring: Implement checks for data freshness, record counts, and data quality metrics
+- [ ] Add logging improvements: Enhance logging with structured logging, log levels, and log aggregation (ELK stack or similar)
+
+### Performance
+- [ ] Optimize Spark checkpointing: Review checkpoint locations and ensure they are on persistent storage, not ephemeral
+- [ ] Optimize ClickHouse writes: Review batch sizes and write strategies for better performance in `northwind-ch-stg.py`
+- [ ] Add connection pooling: Implement connection pooling for ClickHouse JDBC connections in Spark jobs
+- [ ] Optimize incremental ETL: Review and optimize the incremental ETL logic in `northwind-dw.py` for better performance with large datasets
+
+### Testing
+- [ ] Add unit tests: Create unit tests for ETL transformations, data validation functions, and utility functions
+- [ ] Add integration tests: Create integration tests for end-to-end pipeline validation (PostgreSQL → ClickHouse)
+- [ ] Add data validation tests: Create tests to verify data consistency between source and target, referential integrity checks
+
+### Documentation
+- [ ] Update README: Remove references to deleted files (`northwind-etl-dw.py`, `test.py`, `checks.md`, `pipeline_review_report.md`, `test_data_verification_summary.md`)
+- [ ] Add architecture diagrams: Create detailed architecture diagrams showing data flow, components, and interactions
+- [ ] Add data dictionary: Document all dimension and fact tables, their schemas, and relationships
+- [ ] Add deployment guide: Create detailed deployment guide with prerequisites, step-by-step instructions, and troubleshooting
+- [ ] Add runbook: Create operational runbook with common issues, recovery procedures, and maintenance tasks
+
+### Deployment
+- [ ] Add health checks: Implement Docker health checks for all containers in docker-compose files
+- [ ] Add resource limits: Set appropriate CPU and memory limits for all containers in docker-compose files
+- [ ] Add restart policies: Configure restart policies for all containers to ensure high availability
+- [ ] Add environment variable support: Replace hardcoded values with environment variables in docker-compose files
+- [ ] Create startup script: Create a single script to start all services in correct order with dependency checks
+- [ ] Add graceful shutdown: Implement graceful shutdown procedures for Spark streaming jobs
+
+### Security
+- [ ] Secure credentials: Move all passwords and sensitive data to environment variables or secrets management
+- [ ] Add network security: Review and restrict network access between containers using Docker networks
+- [ ] Add SSL/TLS: Implement SSL/TLS for Kafka, ClickHouse, and PostgreSQL connections
+
+### Maintenance
+- [ ] Add data retention policies: Implement TTL and data retention policies for staging tables in ClickHouse
+- [ ] Add cleanup scripts: Create scripts for cleaning up old checkpoints, logs, and temporary files
+- [ ] Add backup procedures: Implement backup and restore procedures for ClickHouse data warehouse
+- [ ] Add maintenance scripts: Create scripts for common maintenance tasks (vacuum, optimize, etc.)
+
+### Schema
+- [ ] Review ClickHouse schema: Ensure all staging tables use ReplacingMergeTree with updatedate for proper CDC handling
+- [ ] Add missing indexes: Review and add appropriate indexes/ORDER BY clauses for better query performance
+- [ ] Fix schema inconsistencies: Review data type mismatches between staging tables and dimension/fact tables
+- [ ] Add constraints: Add CHECK constraints where appropriate for data validation at database level
