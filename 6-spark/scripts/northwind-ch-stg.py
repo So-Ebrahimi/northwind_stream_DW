@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, get_json_object, when, lit, current_timestamp, struct, to_json
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
-from norhwind_schemas import * 
+from northwind_schemas import * 
 from pyspark.sql.functions import expr, date_format
 spark = SparkSession.builder \
     .appName("example") \

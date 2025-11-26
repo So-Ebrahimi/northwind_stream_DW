@@ -72,8 +72,8 @@ All containers should show status `Up` (healthy).
 
 ```
 northwind_stream_DW/
-├── 0-info/                    # Documentation and diagrams
-├── 1-postgres/                # PostgreSQL setup with Northwind database
+├── 0-info/                   # Documentation and diagrams
+├── 1-postgres/               # PostgreSQL setup with Northwind database
 ├── 2-zookeeper/              # Zookeeper configuration
 ├── 3-kafka/                  # Kafka broker setup
 ├── 4-debezium/               # Debezium Connect CDC connector
@@ -83,9 +83,7 @@ northwind_stream_DW/
 ├── 6-spark/                  # Spark cluster and ETL jobs
 │   └── scripts/
 │       ├── northwind-ch-stg.py    # CDC streaming job
-│       ├── northwind-dw.py        # Star schema builder
-│       ├── northwind-etl-dw.py    # Incremental ETL job
-│       ├── test.py                # Main ETL job (incremental processing)
+│       ├── northwind-dw.py        # Star schema builder (incremental processing)
 │       └── norhwind_schemas.py    # Debezium schema definitions
 ├── checks.md                 # Pipeline diagnostic checklist
 ├── pipeline_review_report.md # Comprehensive architecture review
@@ -202,7 +200,6 @@ See [LICENSE](LICENSE) file for details.
 ## Todo List
 
 ### Code Quality
-- [ ] Fix typo in schema file: Rename `norhwind_schemas.py` to `northwind_schemas.py` (typo: norhwind → northwind)
 - [ ] Standardize date handling: Review and fix date transformation logic in `northwind-ch-stg.py` - currently only handles employees and orders, should handle all date columns consistently
 - [ ] Fix SupplierKey mapping: In `northwind-dw.py` `process_dim_products()`, SupplierKey is set to NULL - need to properly map supplier_id to SupplierKey from DimSuppliers
 - [ ] Add error handling: Implement comprehensive try-catch blocks and error logging in both Spark jobs (`northwind-ch-stg.py` and `northwind-dw.py`)
