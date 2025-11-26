@@ -1,132 +1,200 @@
-# Data-pipeline-for-northwind
-POSTGRESQL(NORTHWIND OLTP) -> DEBEZIUM -> kafka -> SPARK -> CLICKHOUSE(DW)
+# Northwind Stream Data Warehouse
 
+A real-time data pipeline that streams data from PostgreSQL (Northwind OLTP database) to ClickHouse data warehouse using Change Data Capture (CDC) technology.
 
+## Architecture
+
+```
+PostgreSQL (OLTP) → Debezium (CDC) → Kafka → Spark → ClickHouse (DW)
+```
+
+### Pipeline Flow
+
+1. **PostgreSQL**: Source OLTP database containing the Northwind sample database
+2. **Debezium**: Captures database changes using PostgreSQL logical replication
+3. **Kafka**: Message broker that stores CDC events as topics
+4. **Spark**: Processes streaming data and performs ETL transformations
+   - **CDC Streaming Job**: Streams data from Kafka to ClickHouse staging tables
+   - **DW ETL Job**: Builds star schema dimensions and facts from staging tables
+5. **ClickHouse**: Data warehouse with star schema design for analytical queries
+
+## Technology Stack
+
+- **PostgreSQL 18**: Source database (OLTP)
+- **Debezium**: Change Data Capture connector
+- **Apache Kafka**: Distributed streaming platform
+- **Apache Spark**: Distributed data processing engine
+- **ClickHouse**: Column-oriented database for analytics (with replication)
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- At least 8GB of available RAM
+- Windows PowerShell (for Windows) or Bash (for Linux/Mac)
+
+## Quick Start
+
+### 1. Create Docker Network
+
+```powershell
 docker network create ProjectHost
+```
+
+### 2. Start Services (in order)
+
+```powershell
+# Start PostgreSQL with Northwind database
 docker-compose -f ./1-postgres/docker-compose.yml up -d --force-recreate
+
+# Start Kafka and Zookeeper
 docker-compose -f ./3-kafka/docker-compose.yml up -d --force-recreate
+
+# Start Debezium Connect
 docker-compose -f ./4-debezium/docker-compose.yml up -d --force-recreate
+
+# Start ClickHouse (2 replicas)
 docker-compose -f ./5-clickhouse/docker-compose.yml up -d --force-recreate
+
+# Start Spark (Master, Worker, and ETL jobs)
 docker-compose -f ./6-spark/docker-compose.yml up -d --force-recreate
+```
 
-INSERT INTO orders VALUES (11079, 'RATTC', 1, '1998-05-06', '1998-06-03', NULL, 2, 8.52999973, 'Rattlesnake Canyon Grocery', '2817 Milton Dr.', 'Albuquerque', 'NM', '87110', 'USA');
-INSERT INTO order_details VALUES (11079, 7, 30, 1, 0.0500000007);
-INSERT INTO order_details VALUES (11079, 8, 40, 2, 0.100000001);
-INSERT INTO order_details VALUES (11079, 10, 31, 1, 0);
+### 3. Verify Pipeline Status
 
+Check container health:
+```powershell
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
 
+All containers should show status `Up` (healthy).
 
-SELECT DISTINCT
-        Country,
-        Region,
-        City,
-        postal_code ,
-        address 
-FROM
-(
-    -- From Customers
-    SELECT
-        Country,
-        Region,
-        City,
-        postal_code ,
-        address 
-    FROM Customers
-    
-    UNION ALL
-    
-    -- From Suppliers
-    SELECT
-        Country,
-        Region,
-        City,
-        postal_code ,
-        address 
-    FROM Suppliers
+## Project Structure
 
-    UNION ALL
-    
-    -- From Employees
-    SELECT
-        Country,
-        Region,
-        City,
-        postal_code ,
-        address 
-    FROM Employees
-)
-WHERE Country IS NOT NULL;
+```
+northwind_stream_DW/
+├── 0-info/                    # Documentation and diagrams
+├── 1-postgres/                # PostgreSQL setup with Northwind database
+├── 2-zookeeper/              # Zookeeper configuration
+├── 3-kafka/                  # Kafka broker setup
+├── 4-debezium/               # Debezium Connect CDC connector
+├── 5-clickhouse/             # ClickHouse data warehouse (2 replicas)
+│   └── init-db/
+│       └── init.sql          # Star schema table definitions
+├── 6-spark/                  # Spark cluster and ETL jobs
+│   └── scripts/
+│       ├── northwind-ch-stg.py    # CDC streaming job
+│       ├── northwind-dw.py        # Star schema builder
+│       ├── northwind-etl-dw.py    # Incremental ETL job
+│       ├── test.py                # Main ETL job (incremental processing)
+│       └── norhwind_schemas.py    # Debezium schema definitions
+├── checks.md                 # Pipeline diagnostic checklist
+├── pipeline_review_report.md # Comprehensive architecture review
+└── test_data_verification_summary.md # Test data validation results
+```
 
+## Components
 
-🚀 Steps to Implement Star Schema DW with CDC + Spark + ClickHouse
-1️⃣ Ingest CDC data (current step)
+### PostgreSQL (Port 15432)
+- Source OLTP database with Northwind sample data
+- Configured with logical replication for CDC
+- Replication slot: `debezium`
 
-Continue streaming from Kafka → Spark → raw staging tables.
+### Debezium Connect
+- Captures INSERT, UPDATE, DELETE operations
+- Publishes changes to Kafka topics
+- Topic naming: `northwind.public.<table_name>`
 
-These tables store unprocessed CDC data.
+### Kafka
+- Ports: 39092, 29092
+- Stores CDC events as topics
+- Topics are consumed by Spark streaming jobs
 
-2️⃣ Create Staging Layer
+### Spark Cluster
+- **Master**: Coordinates jobs
+- **Worker**: Executes tasks
+- **pyspark-job-cdc**: Streams CDC data from Kafka to ClickHouse staging
+- **pyspark-job-dw**: Incremental ETL from staging to data warehouse
 
-Store raw CDC output in ClickHouse.
+### ClickHouse (Ports 18123, 28123)
+- **Staging Tables**: `northwind.*` (raw CDC data)
+- **Data Warehouse**: Star schema with dimensions and facts
+  - **Dimensions**: DimGeography, DimCustomer, DimEmployees, DimSuppliers, DimProducts, DimShippers, DimTerritories, DimDate
+  - **Facts**: FactOrders, FactEmployeeTerritories
 
-Used for traceability and source-of-truth.
+## Data Warehouse Schema
 
-3️⃣ Design Star Schema
+The data warehouse implements a **star schema** design:
 
-Define Fact tables (events, transactions, e.g., orders).
+- **Dimension Tables**: Store descriptive attributes (customers, products, employees, etc.)
+- **Fact Tables**: Store business metrics and transactions (orders, employee territories)
+- **Date Dimension**: Pre-populated date dimension (1970-2050)
 
-Define Dimension tables (entities, e.g., customers, products).
+For detailed schema information, see `pipeline_review_report.md`.
 
-Assign primary keys and relationships.
+## Verification
 
-4️⃣ Develop Transformation Layer (ETL in Spark)
+### Check Debezium Connector Status
+```powershell
+docker exec debezium-connect curl -s http://localhost:8083/connectors/postgres-northwind-connector/status
+```
 
-Read staging data.
+### Check Kafka Topics
+```powershell
+docker exec kafka kafka-topics.sh --list --bootstrap-server localhost:9092
+```
 
-Apply cleaning, mapping, data standardization.
+### Query ClickHouse Staging
+```powershell
+docker exec clickhouse1 clickhouse-client --query "SELECT COUNT(*) FROM northwind.northwind_orders"
+```
 
-Split into Fact and Dimension structures.
+### Query Data Warehouse
+```powershell
+docker exec clickhouse1 clickhouse-client --query "SELECT COUNT(*) FROM FactOrders"
+```
 
-5️⃣ Handle Slowly Changing Dimensions (SCD)
+For comprehensive verification steps, see `checks.md`.
 
-Typically SCD Type 2: add versioned rows.
+## Monitoring
 
-Mark current vs historical values.
+### View Spark Job Logs
+```powershell
+# CDC streaming job
+docker logs pyspark-job-cdc --tail 50
 
-6️⃣ Surrogate Key Generation
+# DW ETL job
+docker logs pyspark-job-dw --tail 50
+```
 
-Create DW-specific IDs (not using CDC primary keys directly).
+### Check Container Health
+```powershell
+docker ps --filter "name=postgres|kafka|debezium|clickhouse|spark" --format "table {{.Names}}\t{{.Status}}"
+```
 
-Example: customer_key, order_key.
+## Documentation
 
-7️⃣ Load Dimension Tables
+- **[Pipeline Review Report](pipeline_review_report.md)**: Comprehensive architecture review, code analysis, and recommendations
+- **[Diagnostic Checklist](checks.md)**: Step-by-step validation procedures for each pipeline component
+- **[Test Data Verification](test_data_verification_summary.md)**: Test data insertion and pipeline validation results
 
-Insert new data or update existing versioned rows.
+## Stopping the Pipeline
 
-Use Spark → ClickHouse.
+To stop all services:
+```powershell
+docker-compose -f ./6-spark/docker-compose.yml down
+docker-compose -f ./5-clickhouse/docker-compose.yml down
+docker-compose -f ./4-debezium/docker-compose.yml down
+docker-compose -f ./3-kafka/docker-compose.yml down
+docker-compose -f ./1-postgres/docker-compose.yml down
+```
 
-8️⃣ Load Fact Tables
+## Notes
 
-Use keys from dimensions.
+- The pipeline processes changes in real-time using CDC technology
+- Spark jobs use checkpointing for fault tolerance
+- ClickHouse uses ReplacingMergeTree for handling updates
+- The ETL job runs incrementally, processing only changed records based on `updatedate`
 
-Insert transaction records with references.
+## License
 
-9️⃣ Schedule & Automate
-
-Trigger ETL with micro-batches or scheduled jobs.
-
-Monitor & validate loads.
-
-🔟 Optimize ClickHouse Tables
-
-Use correct engines: MergeTree, ReplacingMergeTree, etc.
-
-Index on keys for fast joins.
-
-1️⃣1️⃣ Implement Data Quality Checks
-
-Validate counts, referential integrity, null checks.
-
-1️⃣2️⃣ Use BI Tool or Dashboard
-
-Connect ClickHouse to analytics tool (Metabase, Grafana, PowerBI, etc.)
+See [LICENSE](LICENSE) file for details.
