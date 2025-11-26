@@ -38,9 +38,9 @@ services:
     networks:
       - ProjectHost
 
-  pyspark-job:
+  pyspark-job-cdc:
     image: sobhanebrahimi/spark:0.1
-    container_name: pyspark-job
+    container_name: pyspark-job-cdc
     depends_on:
       - spark-master
       - spark-worker
@@ -51,7 +51,25 @@ services:
     command:
       [
         "/opt/bitnami/spark/bin/spark-submit",
-        "/opt/bitnami/spark/scripts/northwind-dw.py"      ]
+        "/opt/bitnami/spark/scripts/northwind-ch-stg.py"]
+    networks:
+      - ProjectHost
+
+  pyspark-job-dw:
+    image: sobhanebrahimi/spark:0.1
+    container_name: pyspark-job-dw
+    depends_on:
+      - spark-master
+      - spark-worker
+      - pyspark-job-cdc
+    environment:
+      - HOME=/tmp
+    volumes:
+      - ./scripts:/opt/bitnami/spark/scripts
+    command:
+      [
+        "/opt/bitnami/spark/bin/spark-submit",
+        "/opt/bitnami/spark/scripts/test.py"      ]
     networks:
       - ProjectHost
 

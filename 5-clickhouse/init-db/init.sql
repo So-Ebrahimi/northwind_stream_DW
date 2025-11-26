@@ -12,9 +12,7 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_categories/{replica}',
-    '{replica}',
-     updatedate
-    
+    '{replica}'
 )
 ORDER BY category_id;
 
@@ -28,7 +26,7 @@ ORDER BY category_id;
 -- )
 -- ENGINE = ReplicatedMergeTree(
 --     '/clickhouse/tables/northwind/northwind_customer_customer_demo/{replica}',
---     '{replica}',
+--     '{replica}'
 --      updatedate
 -- )
 -- ORDER BY (customer_id, customer_type_id);
@@ -43,7 +41,7 @@ ORDER BY category_id;
 -- )
 -- ENGINE = ReplicatedMergeTree(
 --     '/clickhouse/tables/northwind/northwind_customer_demographics/{replica}',
---     '{replica}',
+--     '{replica}'
 --      updatedate
 -- )
 -- ORDER BY customer_type_id;
@@ -67,9 +65,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_customers/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY customer_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_employees
@@ -98,9 +95,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_employees/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY employee_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_employee_territories
@@ -113,9 +109,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_employee_territories/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY (employee_id, territory_id);
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_order_details
@@ -131,9 +126,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_order_details/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY (order_id, product_id);
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_orders
@@ -158,9 +152,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_orders/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY order_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_products
@@ -181,9 +174,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_products/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY product_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_region
@@ -196,9 +188,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_region/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY region_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_shippers
@@ -212,9 +203,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_shippers/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY shipper_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_suppliers
@@ -237,9 +227,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_suppliers/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY supplier_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_territories
@@ -253,9 +242,8 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_territories/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY territory_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_us_states
@@ -270,8 +258,119 @@ ON CLUSTER replicated_cluster
 )
 ENGINE = ReplicatedMergeTree(
     '/clickhouse/tables/northwind/northwind_us_states/{replica}',
-    '{replica}',
-     updatedate
-)
+    '{replica}'
+ )
 ORDER BY state_id;
+
+
+CREATE TABLE IF NOT EXISTS DimGeography (
+    GeographyKey UInt64,
+    country String,
+    region String,
+    city String,
+    postal_code String,
+    address String
+) ENGINE = MergeTree()
+ORDER BY GeographyKey;
+
+
+CREATE TABLE DimCustomer (
+    CustomerKey Int64,
+    CustomerAlternateKey String,
+    GeographyKey UInt64,
+    CompanyName String,
+    ContactName String,
+    ContactTitle String,
+    phone String,
+    fax Nullable(String),
+    updatedate DateTime
+) ENGINE = MergeTree()
+ORDER BY CustomerKey;
+
+
+
+CREATE TABLE IF NOT EXISTS DimEmployees (
+    EmployeeKey Int64,
+    EmployeeAlternateKey String,
+    ParentEmployeeKey Nullable(Int64),
+    GeographyKey UInt64,
+    FirstName String,
+    LastName String,
+    title String,
+    title_of_courtesy String,
+    birth_date Int64,
+    hire_date Int64,
+    home_phone String,
+    extension String,
+    photo String,
+    notes String,
+    photo_path String,
+    updatedate DateTime
+) ENGINE = MergeTree()
+ORDER BY EmployeeKey;
+
+
+CREATE TABLE IF NOT EXISTS DimSuppliers (
+    SupplierKey Int64,
+    SupplierAlternateKey String,
+    GeographyKey UInt64,
+    company_name String,
+    contact_name String,
+    contact_title String,
+    phone String,
+    fax  Nullable(String),
+    homepage Nullable(String),
+    updatedate DateTime
+) ENGINE = MergeTree()
+ORDER BY SupplierKey;
+
+
+
+CREATE TABLE IF NOT EXISTS DimProducts (
+    ProductKey Int64,
+    ProductAlternateKey String,
+    SupplierKey Nullable(Int64),
+    ProductName String,
+    CategoryName String,
+    quantity_per_unit String,
+    unit_price Float32,
+    units_in_stock Int32,
+    units_on_order Int32,
+    reorder_level Int32,
+    discontinued UInt8,
+    updatedate DateTime
+) ENGINE = MergeTree()
+ORDER BY ProductKey;
+
+
+CREATE TABLE IF NOT EXISTS DimShippers (
+    ShipperKey Int64,
+    ShipperAlternateKey String,
+    company_name String,
+    phone String,
+    updatedate DateTime
+) ENGINE = MergeTree()
+ORDER BY ShipperKey;
+
+
+
+CREATE TABLE IF NOT EXISTS FactOrders (
+    FactOrderKey Int64,
+    OrderAlternateKey Int64,
+    CustomerKey Int64,
+    EmployeeKey Int64,
+    ProductKey Int64,
+    ShipperKey Int64,
+    OrderDate Int64,
+    DueDate Int64,
+    ShipDate Nullable(Int64),
+    Quantity Int32,
+    UnitPrice Float32,
+    TotalAmount Float32,
+    Freight Float32,
+    updatedate DateTime
+)
+ENGINE = ReplacingMergeTree(updatedate)
+ORDER BY (OrderAlternateKey, ProductKey);
+
 
