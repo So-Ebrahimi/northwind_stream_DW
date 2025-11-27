@@ -301,7 +301,102 @@ def process_dim_shippers(last_run):
     write_ch_table(dim_shippers, "DimShippers")
     print(f"DimShippers: wrote {dim_shippers.count()} rows")
 
+def process_dim_territories(last_run):
+    where = f"updatedate > toDateTime('{last_run}')"
+    df_changed = read_ch_table("northwind.northwind_territories", where)
+    if df_changed.rdd.isEmpty():
+        print("DimTerritories: no changes")
+        return
+    regions = read_ch_table("northwind.northwind_region").select(
+        col("region_id"),
+        trim(col("region_description")).alias("RegionDescription")
+    )
+    dim_terr = df_changed.alias("terr") \
+        .join(regions.alias("reg"), "region_id", "left") \
+        .withColumn("TerritoryKey", expr("hash(terr.territory_id)")) \
+        .withColumn("TerritoryAlternateKey", col("terr.territory_id").cast("string")) \
+        .withColumn("TerritoryDescription", trim(col("terr.territory_description"))) \
+        .withColumn("RegionDescription", col("reg.RegionDescription")) \
+        .withColumn("StartDate", col("terr.updatedate").cast(TimestampType())) \
+        .withColumn("EndDate", lit(None).cast(TimestampType())) \
+        .withColumn("updatedate", col("terr.updatedate")) \
+        .select(
+            col("TerritoryKey").cast("long"),
+            "TerritoryAlternateKey",
+            "RegionDescription",
+            "TerritoryDescription",
+            "StartDate",
+            "EndDate",
+            "updatedate"
+        )
+    write_ch_table(dim_terr, "DimTerritories")
+    print(f"DimTerritories: wrote {dim_terr.count()} rows")
+
 # ---------------- Fact processing ----------------
+def process_fact_employee_territories(last_run):
+    where_clause = f"updatedate > toDateTime('{last_run}')"
+    df_changed = read_ch_table("northwind.northwind_employee_territories", where_clause)
+    if df_changed.rdd.isEmpty():
+        print("FactEmployeeTerritories: no changes")
+        return
+
+    try:
+        dim_emp = read_ch_table("DimEmployees").select(
+            col("EmployeeAlternateKey").alias("EmployeeAlternateKeyDim"),
+            col("EmployeeKey")
+        )
+    except Exception as exc:
+        print(f"FactEmployeeTerritories: cannot read DimEmployees ({exc})")
+        return
+
+    try:
+        dim_terr = read_ch_table("DimTerritories").select(
+            col("TerritoryAlternateKey").alias("TerritoryAlternateKeyDim"),
+            col("TerritoryKey")
+        )
+    except Exception as exc:
+        print(f"FactEmployeeTerritories: cannot read DimTerritories ({exc})")
+        return
+
+    pairs = df_changed.select(
+        col("employee_id").cast("string").alias("EmployeeAlternateKey"),
+        col("territory_id").cast("string").alias("TerritoryAlternateKey"),
+        col("updatedate")
+    ).groupBy("EmployeeAlternateKey", "TerritoryAlternateKey") \
+     .agg(max("updatedate").alias("updatedate"))
+    total_pairs = pairs.count()
+
+    fact = pairs \
+        .join(dim_emp, pairs.EmployeeAlternateKey == dim_emp.EmployeeAlternateKeyDim, "left") \
+        .join(dim_terr, pairs.TerritoryAlternateKey == dim_terr.TerritoryAlternateKeyDim, "left") \
+        .drop("EmployeeAlternateKeyDim", "TerritoryAlternateKeyDim") \
+        .drop("EmployeeAlternateKey", "TerritoryAlternateKey")
+
+    fact = fact.withColumn("EmployeeKey", col("EmployeeKey").cast("long")) \
+               .withColumn("TerritoryKey", col("TerritoryKey").cast("long")) \
+               .withColumn(
+                    "FactEmployeeTerritoryKey",
+                    expr("hash(EmployeeKey, TerritoryKey)").cast("long")
+               ) \
+               .select(
+                    "FactEmployeeTerritoryKey",
+                    "EmployeeKey",
+                    "TerritoryKey",
+                    "updatedate"
+               ).dropna(subset=["EmployeeKey", "TerritoryKey"])
+
+    row_count = fact.count()
+    if row_count == 0:
+        print("FactEmployeeTerritories: nothing to upsert after key resolution")
+        return
+
+    write_ch_table(fact, "FactEmployeeTerritories")
+    dropped = total_pairs - row_count
+    if dropped:
+        print(f"FactEmployeeTerritories: skipped {dropped} pairs missing dimension keys")
+    print(f"FactEmployeeTerritories: wrote {row_count} rows")
+
+
 def process_fact_orders(last_run):
     # 1) find all order_ids changed in orders or order_details since last_run
     where_o = f"updatedate > toDateTime('{last_run}')"
@@ -378,9 +473,11 @@ def main_once():
     process_dim_suppliers(last_run)
     process_dim_products(last_run)
     process_dim_shippers(last_run)
+    process_dim_territories(last_run)
     # other dims (categories, territories) if you want can be added similarly
 
     # process facts
+    process_fact_employee_territories(last_run)
     process_fact_orders(last_run)
 
     # update last_run only after successful processing

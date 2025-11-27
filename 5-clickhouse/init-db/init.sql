@@ -353,6 +353,18 @@ CREATE TABLE IF NOT EXISTS DimShippers (
 ORDER BY ShipperKey;
 
 
+CREATE TABLE IF NOT EXISTS DimTerritories (
+    TerritoryKey Int64,
+    TerritoryAlternateKey String,
+    RegionDescription String,
+    TerritoryDescription String,
+    StartDate DateTime,
+    EndDate Nullable(DateTime),
+    updatedate DateTime
+) ENGINE = MergeTree()
+ORDER BY TerritoryKey;
+
+
 
 CREATE TABLE IF NOT EXISTS FactOrders (
     FactOrderKey Int64,
@@ -372,6 +384,16 @@ CREATE TABLE IF NOT EXISTS FactOrders (
 )
 ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY (OrderAlternateKey, ProductKey);
+
+
+CREATE TABLE IF NOT EXISTS FactEmployeeTerritories (
+    FactEmployeeTerritoryKey Int64,
+    EmployeeKey Int64,
+    TerritoryKey Int64,
+    updatedate DateTime
+)
+ENGINE = ReplacingMergeTree(updatedate)
+ORDER BY (EmployeeKey, TerritoryKey);
 
 
 CREATE TABLE IF NOT EXISTS DimDate
