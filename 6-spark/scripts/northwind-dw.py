@@ -46,6 +46,74 @@ def write_ch_table(df, table_name, mode="append"):
         .mode(mode) \
         .save()
 
+def table_has_rows(table_name):
+    """
+    Returns True if the ClickHouse table already contains data.
+    """
+    try:
+        df = spark.read.format("jdbc") \
+            .option("driver", CLICKHOUSE_DRIVER) \
+            .option("url", CLICKHOUSE_URL) \
+            .option("user", CLICKHOUSE_USER) \
+            .option("password", CLICKHOUSE_PASS) \
+            .option("dbtable", f"(SELECT 1 FROM {table_name} LIMIT 1) t") \
+            .load()
+        return not df.rdd.isEmpty()
+    except Exception as exc:
+        print(f"[table_has_rows] Could not query {table_name}: {exc}")
+        return False
+
+def initialize_dim_date():
+    """
+    Populates DimDate with dates 1970-01-01 .. 2050-12-31 on the first run.
+    """
+    if table_has_rows("DimDate"):
+        print("DimDate already populated - skipping initialization")
+        return
+
+    start_date = datetime(1970, 1, 1)
+    end_date = datetime(2050, 12, 31)
+    total_days = (end_date - start_date).days + 1
+    start_literal = start_date.strftime("%Y-%m-%d")
+
+    dim_date = spark.range(0, total_days, 1, numPartitions=1) \
+        .withColumn("DateValue", expr(f"date_add('{start_literal}', cast(id as int))")) \
+        .drop("id") \
+        .withColumn(
+            "DateKey",
+            (year("DateValue") * 10000 + month("DateValue") * 100 + dayofmonth("DateValue")).cast("int")
+        ) \
+        .withColumn("FullDate", date_format("DateValue", "yyyy-MM-dd")) \
+        .withColumn("DayOfWeek", dayofweek("DateValue")) \
+        .withColumn("DayName", date_format("DateValue", "EEEE")) \
+        .withColumn("DayOfMonth", dayofmonth("DateValue")) \
+        .withColumn("DayOfYear", dayofyear("DateValue")) \
+        .withColumn("WeekOfYear", weekofyear("DateValue")) \
+        .withColumn("Month", month("DateValue")) \
+        .withColumn("MonthName", date_format("DateValue", "MMMM")) \
+        .withColumn("Quarter", quarter("DateValue")) \
+        .withColumn("Year", year("DateValue")) \
+        .withColumn("IsWeekend", when(dayofweek("DateValue").isin(1, 7), lit(1)).otherwise(lit(0)))
+
+    dim_date = dim_date.select(
+        col("DateKey"),
+        col("DateValue").alias("Date"),
+        "FullDate",
+        "DayOfWeek",
+        "DayName",
+        "DayOfMonth",
+        "DayOfYear",
+        "WeekOfYear",
+        "Month",
+        "MonthName",
+        "Quarter",
+        "Year",
+        "IsWeekend"
+    )
+
+    write_ch_table(dim_date, "DimDate", mode="append")
+    print(f"DimDate initialized with {dim_date.count()} rows")
+
 def get_last_run():
     if not os.path.exists(LAST_RUN_FILE):
         # اولین اجرا: یک بازه کوتاه قبل تا همه رکوردها را نگیریم (یا می‌توان full load انجام داد)
@@ -290,6 +358,9 @@ def main_once():
     last_run = get_last_run()
     print("last_run =", last_run)
     now_ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ensure static dimensions are seeded
+    initialize_dim_date()
 
     # process dimensions (only those with updatedate)
     process_dim_customers(last_run)

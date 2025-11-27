@@ -374,3 +374,21 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY (OrderAlternateKey, ProductKey);
 
 
+CREATE TABLE IF NOT EXISTS DimDate
+(
+    DateKey     UInt32,
+    Date        Date,
+    FullDate    String,
+    DayOfWeek   UInt8,
+    DayName     String,
+    DayOfMonth  UInt8,
+    DayOfYear   UInt16,
+    WeekOfYear  UInt8,
+    Month       UInt8,
+    MonthName   String,
+    Quarter     UInt8,
+    Year        UInt16,
+    IsWeekend   UInt8
+)
+ENGINE = MergeTree()
+ORDER BY DateKey;
