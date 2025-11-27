@@ -249,19 +249,29 @@ def process_dim_products(last_run):
     if df_changed.rdd.isEmpty():
         print("DimProducts: no changes")
         return
-    # read categories and suppliers full (they are small)
+    # read categories (small) and resolve SupplierKey from dimension table
     categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
-    suppliers = read_ch_table("northwind.northwind_suppliers").select(col("supplier_id").alias("SupplierAlternateKey"))
-    dim_products = df_changed.join(categories, "category_id", "left") \
-        .withColumn("ProductKey", expr("hash(product_id)")) \
+    dim_suppliers = read_ch_table("DimSuppliers").select(
+        col("SupplierKey").cast("long"),
+        col("SupplierAlternateKey")
+    )
+
+    dim_products = df_changed.alias("prod") \
+        .join(categories.alias("cat"), "category_id", "left") \
+        .join(
+            dim_suppliers.alias("sup"),
+            col("prod.supplier_id") == col("sup.SupplierAlternateKey"),
+            "left"
+        ) \
+        .withColumn("ProductKey", expr("hash(prod.product_id)")) \
         .withColumnRenamed("product_id","ProductAlternateKey") \
         .withColumnRenamed("product_name","ProductName") \
         .select(
             col("ProductKey").cast("long"),
             col("ProductAlternateKey"),
-            lit(None).cast("long").alias("SupplierKey"),   # supplierKey resolution could be improved by mapping supplier_id to SupplierKey table
+            col("sup.SupplierKey").alias("SupplierKey"),
             col("ProductName"),
-            col("category_name").alias("CategoryName"),
+            col("cat.category_name").alias("CategoryName"),
             "quantity_per_unit",
             "unit_price",
             "units_in_stock",

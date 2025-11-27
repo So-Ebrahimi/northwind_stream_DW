@@ -210,7 +210,6 @@ See [LICENSE](LICENSE) file for details.
 
 ### Architecture
 - [ ] Implement FactEmployeeTerritories: Create ETL process for FactEmployeeTerritories fact table (currently missing from `northwind-dw.py`)
-- [ ] Add DimDate dimension: Create and populate DimDate dimension table (1970-2050) as mentioned in README but not implemented
 - [ ] Add DimTerritories dimension: Implement DimTerritories dimension table processing in ETL pipeline
 - [ ] Handle DELETE operations: Review CDC delete handling - currently using ReplacingMergeTree but need to verify DELETE operations are properly processed
 - [ ] Implement proper CDC operation handling: In `northwind-ch-stg.py`, operation field is captured but not used - need to handle INSERT/UPDATE/DELETE differently
