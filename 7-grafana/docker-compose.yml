@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  grafana:
+    image: sobhanebrahimi/grafana:0.1
+    container_name: grafana
+    ports:
+      - "3000:3000"  # Grafana web UI
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin       # Default username
+      - GF_SECURITY_ADMIN_PASSWORD=admin   # Default password
+    restart: unless-stopped
+    networks:
+      - ProjectHost
+
+networks:
+  ProjectHost:
+    external: true
