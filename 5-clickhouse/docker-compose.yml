@@ -41,7 +41,7 @@ services:
     entrypoint: >
       bash -c "
         /entrypoint.sh &   # start clickhouse server in background
-        sleep 20            # wait for clickhouse server to start
+        sleep 10           # wait for clickhouse server to start
         clickhouse-client --multiquery < /tmp/init-db/init.sql
         wait
       "

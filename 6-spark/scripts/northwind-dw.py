@@ -12,8 +12,8 @@ CLICKHOUSE_USER = "default"
 CLICKHOUSE_PASS = "123456"
 CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver"
 
-LAST_RUN_FILE = "last_run.txt"   # فایل ذخیره زمان آخرین اجرا
-POLL_INTERVAL_SEC = 20          # اگر می‌خوای خودت اسکریپت رو loop کنی (پیشنهاد: cron یا scheduler)
+LAST_RUN_FILE = "last_run.txt"   
+POLL_INTERVAL_SEC = 20         
 # ----------------------------------
 
 spark = SparkSession.builder \
@@ -116,7 +116,6 @@ def initialize_dim_date():
 
 def get_last_run():
     if not os.path.exists(LAST_RUN_FILE):
-        # اولین اجرا: یک بازه کوتاه قبل تا همه رکوردها را نگیریم (یا می‌توان full load انجام داد)
         start = (datetime.utcnow() - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
         return start
     with open(LAST_RUN_FILE, "r") as f:
@@ -128,26 +127,21 @@ def set_last_run(ts):
 
 # ---------------- transformations for dimensions ----------------
 def process_dim_customers(last_run):
-    where = f"updatedate > toDateTime('{last_run}')"  # فرض: updatedate از نوع DateTime در ClickHouse
+    where = f"updatedate > toDateTime('{last_run}')" 
     df_changed = read_ch_table("northwind.northwind_customers", where)
     if df_changed.rdd.isEmpty():
         print("DimCustomer: no changes")
         return
-    # clean geo like in original code
     from pyspark.sql.functions import coalesce, lit
     df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
                            .withColumn("region", coalesce("region", lit("Unknown"))) \
                            .withColumn("city", coalesce("city", lit("Unknown"))) \
                            .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
                            .withColumn("address", coalesce("address", lit("Unknown")))
-    # build geography rows (we will write new geography rows too)
     geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
-    # assign GeographyKey (here: we upsert by writing full rows to DimGeography; using Replace strategy in CH)
     geo_out = geo.withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
     write_ch_table(geo_out.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
-    # join to generate dimensional customer rows
-    # read existing DimGeography (to resolve keys) - could instead compute same hash
     dim_geo = geo_out.select("GeographyKey","country","region","city","postal_code","address")
     dim_customer = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
         .withColumn("CustomerKey", expr("hash(customer_id)")) \
@@ -163,7 +157,6 @@ def process_dim_customers(last_run):
             col("fax"),
             col("updatedate").alias("updatedate")
         )
-    # write: append. ClickHouse table should be ReplacingMergeTree(updatedate) and ORDER BY CustomerAlternateKey
     write_ch_table(dim_customer, "DimCustomer")
     print(f"DimCustomer: wrote {dim_customer.count()} rows")
 
@@ -244,12 +237,10 @@ def process_dim_suppliers(last_run):
 
 def process_dim_products(last_run):
     where = f"p.updatedate > toDateTime('{last_run}')"
-    # need join with categories and suppliers - we'll read changed products and join full categories/suppliers
     df_changed = read_ch_table("northwind.northwind_products p", where)
     if df_changed.rdd.isEmpty():
         print("DimProducts: no changes")
         return
-    # read categories (small) and resolve SupplierKey from dimension table
     categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
     dim_suppliers = read_ch_table("DimSuppliers").select(
         col("SupplierKey").cast("long"),
@@ -398,7 +389,6 @@ def process_fact_employee_territories(last_run):
 
 
 def process_fact_orders(last_run):
-    # 1) find all order_ids changed in orders or order_details since last_run
     where_o = f"updatedate > toDateTime('{last_run}')"
     where_od = f"updatedate > toDateTime('{last_run}')"
     orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
@@ -411,13 +401,11 @@ def process_fact_orders(last_run):
     changed_ids_list = [r["order_id"] for r in changed_order_ids.collect()]
     print(f"FactOrders: rebuilding for {len(changed_ids_list)} orders (sample: {changed_ids_list[:5]})")
 
-    # 2) read the full orders and order_details for those ids
     ids_csv = ",".join(str(i) for i in changed_ids_list)
     where_full_orders = f"order_id IN ({ids_csv})"
     orders_df = read_ch_table("northwind.northwind_orders", where_full_orders).alias("o")
     od_df = read_ch_table("northwind.northwind_order_details", where_full_orders).alias("od")
 
-    # 3) read dimension keys from built dimensions (we assume DimCustomer/DimEmployees/DimProducts/DimShippers are already populated)
     dim_customer = read_ch_table("DimCustomer").select(col("CustomerAlternateKey"), col("CustomerKey"))
     dim_emp = read_ch_table("DimEmployees").select(col("EmployeeAlternateKey"), col("EmployeeKey"))
     dim_prod = read_ch_table("DimProducts").select(col("ProductAlternateKey"), col("ProductKey"))
@@ -454,7 +442,6 @@ def process_fact_orders(last_run):
         )
 
 
-    # 5) write fact rows (append). ClickHouse table FactOrders should be ReplacingMergeTree(updatedate) with ORDER BY (OrderAlternateKey, ProductKey) or similar
     write_ch_table(fact, "FactOrders")
     print(f"FactOrders: wrote {fact.count()} rows")
 

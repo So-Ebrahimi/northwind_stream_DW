@@ -75,7 +75,7 @@ for short_name, (table, topic, schema) in table_mapping.items():
         transformed_df = transformDate(transformed_df , ["order_date","required_date","shipped_date"])    
 
     def foreach_batch(batch_df, batch_id, table_name=table):
-        row_count = batch_df.count()  # تعداد ردیف‌های این batch
+        row_count = batch_df.count()  
         print(f"Batch {batch_id} for table {table_name}: {row_count} rows updated")
         
         batch_df.write \
