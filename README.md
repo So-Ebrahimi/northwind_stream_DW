@@ -57,6 +57,9 @@ docker-compose -f ./5-clickhouse/docker-compose.yml up -d --force-recreate
 
 # Start Spark (Master, Worker, and ETL jobs)
 docker-compose -f ./6-spark/docker-compose.yml up -d --force-recreate
+
+# Start grafana (Dashboard)
+docker-compose -f ./7-grafana/docker-compose.yml up -d --force-recreate
 ```
 
 ### 3. Verify Pipeline Status

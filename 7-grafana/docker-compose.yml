@@ -5,10 +5,14 @@ services:
     image: sobhanebrahimi/grafana:0.1
     container_name: grafana
     ports:
-      - "3000:3000"  # Grafana web UI
+      - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin       # Default username
-      - GF_SECURITY_ADMIN_PASSWORD=admin   # Default password
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning
+      - ./dashboards:/var/lib/grafana/dashboards
     restart: unless-stopped
     networks:
       - ProjectHost
