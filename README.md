@@ -5,7 +5,7 @@ A real-time data pipeline that streams data from PostgreSQL (Northwind OLTP data
 ## Architecture
 
 ```
-PostgreSQL (OLTP) → Debezium (CDC) → Kafka → Spark → ClickHouse (DW)
+PostgreSQL (OLTP) → Debezium (CDC) → Kafka → Spark → ClickHouse (DW) → Grafana(Dashboards) 
 ```
 
 ### Pipeline Flow
@@ -68,7 +68,7 @@ docker-compose -f ./7-grafana/docker-compose.yml up -d --force-recreate
 
 Check container health:
 ```powershell
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+docker ps 
 ```
 
 All containers should show status `Up` (healthy).
@@ -81,19 +81,23 @@ Data-pipeline-for-northwind/
 ├── 1-postgres/               # PostgreSQL setup with Northwind database
 │   ├── docker-compose.yml     # PostgreSQL service configuration
 │   ├── Dockerfile            # PostgreSQL image definition
+│   ├── .env                  # Environment variables for PostgreSQL
 │   ├── northwind.sql         # Northwind database schema and data
 │   └── postgresql.conf       # PostgreSQL configuration
 ├── 2-zookeeper/              # Zookeeper configuration
 │   └── Dockerfile            # Zookeeper image definition
 ├── 3-kafka/                  # Kafka broker setup
 │   ├── docker-compose.yml    # Kafka and Zookeeper services
-│   └── Dockerfile            # Kafka image definition
+│   ├── Dockerfile            # Kafka image definition
+│   └── .env                  # Environment variables for Kafka
 ├── 4-debezium/               # Debezium Connect CDC connector
 │   ├── docker-compose.yml    # Debezium Connect service
-│   └── Dockerfile            # Debezium image definition
+│   ├── Dockerfile            # Debezium image definition
+│   └── .env                  # Environment variables for Debezium
 ├── 5-clickhouse/             # ClickHouse data warehouse (2 replicas)
 │   ├── docker-compose.yml    # ClickHouse cluster configuration
 │   ├── Dockerfile            # ClickHouse image definition
+│   ├── .env                  # Environment variables for ClickHouse
 │   ├── config_replica1.xml   # ClickHouse replica 1 configuration
 │   ├── config_replica2.xml   # ClickHouse replica 2 configuration
 │   └── init-db/
@@ -101,6 +105,7 @@ Data-pipeline-for-northwind/
 ├── 6-spark/                  # Spark cluster and ETL jobs
 │   ├── docker-compose.yml    # Spark cluster services
 │   ├── Dockerfile            # Spark image definition
+│   ├── .env                  # Environment variables for Spark
 │   ├── conf/
 │   │   └── spark-defaults.conf # Spark configuration
 │   └── scripts/
@@ -111,6 +116,7 @@ Data-pipeline-for-northwind/
 ├── 7-grafana/                # Grafana monitoring and visualization
 │   ├── docker-compose.yml    # Grafana service configuration
 │   ├── Dockerfile            # Grafana image definition
+│   ├── .env                  # Environment variables for Grafana
 │   ├── northwind_queries.sql # Sample analytical queries
 │   ├── dashboards/           # Grafana dashboard JSON files
 │   └── provisioning/         # Grafana provisioning configuration
