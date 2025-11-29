@@ -4,12 +4,14 @@ services:
   postgres:
     container_name: postgres
     image: sobhanebrahimi/postgres18-northwind-db:0.1
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: northwind
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "15432:5432"
+      - "${POSTGRES_PORT}:${POSTGRES_INTERNAL_PORT}"
     volumes:
       - ./postgresql:/var/lib/postgresql/
     networks:

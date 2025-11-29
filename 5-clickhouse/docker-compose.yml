@@ -4,9 +4,11 @@ services:
   clickhouse-zookeeper:
     image: sobhanebrahimi/zookeper:0.1
     container_name: clickhouse-zookeeper
+    env_file:
+      - .env
     environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
-      - ZOOKEEPER_CLIENT_PORT=2181
+      - ALLOW_ANONYMOUS_LOGIN=${ALLOW_ANONYMOUS_LOGIN}
+      - ZOOKEEPER_CLIENT_PORT=${ZOOKEEPER_CLIENT_PORT}
     # ports:
     #   - "12182:2181"
     #   - "12888:2888"
@@ -18,12 +20,14 @@ services:
     image: sobhanebrahimi/clickhouse:0.1 
     container_name: clickhouse1
     user: root
+    env_file:
+      - .env
     environment:
-      - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=123456
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
     ports:
-      - "19000:9000"
-      - "18123:8123"
+      - "${CLICKHOUSE1_NATIVE_PORT}:9000"
+      - "${CLICKHOUSE1_HTTP_PORT}:8123"
     ulimits:
       nproc: 65535
       nofile:
@@ -50,12 +54,14 @@ services:
     image: sobhanebrahimi/clickhouse:0.1 
     container_name: clickhouse2
     user: root  # نیاز داریم برای اجرای sudo
+    env_file:
+      - .env
     environment:
-      - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=123456
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
     ports:
-      - "29000:9000"
-      - "28123:8123"
+      - "${CLICKHOUSE2_NATIVE_PORT}:9000"
+      - "${CLICKHOUSE2_HTTP_PORT}:8123"
     ulimits:
       nproc: 65535
       nofile:

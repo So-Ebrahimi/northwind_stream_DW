@@ -4,15 +4,17 @@ services:
   connect:
     image: sobhanebrahimi/debezium:0.1
     container_name: debezium-connect
+    env_file:
+      - .env
     environment:
-      BOOTSTRAP_SERVERS: kafka:9092
-      GROUP_ID: "1"
-      CONFIG_STORAGE_TOPIC: connect_configs
-      OFFSET_STORAGE_TOPIC: connect_offsets
-      STATUS_STORAGE_TOPIC: connect_statuses
-      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      ENABLE_DEBEZIUM_SCRIPTING: "true"
+      BOOTSTRAP_SERVERS: ${BOOTSTRAP_SERVERS}
+      GROUP_ID: ${GROUP_ID}
+      CONFIG_STORAGE_TOPIC: ${CONFIG_STORAGE_TOPIC}
+      OFFSET_STORAGE_TOPIC: ${OFFSET_STORAGE_TOPIC}
+      STATUS_STORAGE_TOPIC: ${STATUS_STORAGE_TOPIC}
+      KEY_CONVERTER: ${KEY_CONVERTER}
+      VALUE_CONVERTER: ${VALUE_CONVERTER}
+      ENABLE_DEBEZIUM_SCRIPTING: ${ENABLE_DEBEZIUM_SCRIPTING}
     # ports:
     #   - "8083:8083"
     networks:
@@ -21,24 +23,26 @@ services:
     image: curlimages/curl:8.6.0
     depends_on:
       - connect
+    env_file:
+      - .env
     entrypoint: >
       sh -c "
       sleep 10 &&
       curl -X POST http://connect:8083/connectors
       -H 'Content-Type: application/json'
       -d '{
-        \"name\": \"postgres-northwind-connector\",
+        \"name\": \"${CONNECTOR_NAME}\",
         \"config\": {
           \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",
           \"tasks.max\": \"1\",
-          \"database.hostname\": \"postgres\",
-          \"database.port\": \"5432\",
-          \"database.user\": \"postgres\",
-          \"database.password\": \"postgres\",
-          \"database.dbname\": \"northwind\",
-          \"topic.prefix\": \"northwind\",
-          \"plugin.name\": \"pgoutput\",
-          \"slot.name\": \"debezium\",
+          \"database.hostname\": \"${POSTGRES_HOST}\",
+          \"database.port\": \"${POSTGRES_PORT}\",
+          \"database.user\": \"${POSTGRES_USER}\",
+          \"database.password\": \"${POSTGRES_PASSWORD}\",
+          \"database.dbname\": \"${POSTGRES_DB}\",
+          \"topic.prefix\": \"${TOPIC_PREFIX}\",
+          \"plugin.name\": \"${PLUGIN_NAME}\",
+          \"slot.name\": \"${SLOT_NAME}\",
           \"publication.autocreate.mode\": \"filtered\",
           \"include.schema.changes\": \"true\",
 

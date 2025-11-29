@@ -4,16 +4,18 @@ services:
   spark-master:
     image: sobhanebrahimi/spark:0.1
     container_name: spark-master
+    env_file:
+      - .env
     environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - SPARK_MODE=${SPARK_MODE_MASTER}
+      - SPARK_RPC_AUTHENTICATION_ENABLED=${SPARK_RPC_AUTHENTICATION_ENABLED}
+      - SPARK_RPC_ENCRYPTION_ENABLED=${SPARK_RPC_ENCRYPTION_ENABLED}
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=${SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED}
+      - SPARK_SSL_ENABLED=${SPARK_SSL_ENABLED}
       - HOME=/tmp
     # ports:
-    #   - "8080:8080"
-    #   - "7077:7077"
+    #   - "${SPARK_MASTER_WEBUI_PORT}:8080"
+    #   - "${SPARK_MASTER_PORT}:7077"
     volumes:
       - ./scripts:/opt/bitnami/spark/scripts
     networks:
@@ -22,14 +24,16 @@ services:
   spark-worker:
     image: sobhanebrahimi/spark:0.1
     container_name: spark-worker
+    env_file:
+      - .env
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=1G
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - SPARK_MODE=${SPARK_MODE_WORKER}
+      - SPARK_MASTER_URL=spark://spark-master:${SPARK_MASTER_PORT}
+      - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY}
+      - SPARK_RPC_AUTHENTICATION_ENABLED=${SPARK_RPC_AUTHENTICATION_ENABLED}
+      - SPARK_RPC_ENCRYPTION_ENABLED=${SPARK_RPC_ENCRYPTION_ENABLED}
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=${SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED}
+      - SPARK_SSL_ENABLED=${SPARK_SSL_ENABLED}
       - HOME=/tmp
     depends_on:
       - spark-master
@@ -44,6 +48,8 @@ services:
     depends_on:
       - spark-master
       - spark-worker
+    env_file:
+      - .env
     environment:
       - HOME=/tmp
     volumes:
@@ -62,6 +68,8 @@ services:
       - spark-master
       - spark-worker
       - pyspark-job-cdc
+    env_file:
+      - .env
     environment:
       - HOME=/tmp
     volumes:
