@@ -21,10 +21,12 @@ PostgreSQL (OLTP) → Debezium (CDC) → Kafka → Spark → ClickHouse (DW)
 ## Technology Stack
 
 - **PostgreSQL 18**: Source database (OLTP)
+- **Zookeeper**: Coordination service for Kafka and ClickHouse
 - **Debezium**: Change Data Capture connector
 - **Apache Kafka**: Distributed streaming platform
 - **Apache Spark**: Distributed data processing engine
 - **ClickHouse**: Column-oriented database for analytics (with replication)
+- **Grafana**: Monitoring and visualization platform
 
 ## Prerequisites
 
@@ -74,23 +76,48 @@ All containers should show status `Up` (healthy).
 ## Project Structure
 
 ```
-northwind_stream_DW/
-├── 0-info/                   # Documentation and diagrams
+Data-pipeline-for-northwind/
+
 ├── 1-postgres/               # PostgreSQL setup with Northwind database
+│   ├── docker-compose.yml     # PostgreSQL service configuration
+│   ├── Dockerfile            # PostgreSQL image definition
+│   ├── northwind.sql         # Northwind database schema and data
+│   └── postgresql.conf       # PostgreSQL configuration
 ├── 2-zookeeper/              # Zookeeper configuration
+│   └── Dockerfile            # Zookeeper image definition
 ├── 3-kafka/                  # Kafka broker setup
+│   ├── docker-compose.yml    # Kafka and Zookeeper services
+│   └── Dockerfile            # Kafka image definition
 ├── 4-debezium/               # Debezium Connect CDC connector
+│   ├── docker-compose.yml    # Debezium Connect service
+│   └── Dockerfile            # Debezium image definition
 ├── 5-clickhouse/             # ClickHouse data warehouse (2 replicas)
+│   ├── docker-compose.yml    # ClickHouse cluster configuration
+│   ├── Dockerfile            # ClickHouse image definition
+│   ├── config_replica1.xml   # ClickHouse replica 1 configuration
+│   ├── config_replica2.xml   # ClickHouse replica 2 configuration
 │   └── init-db/
 │       └── init.sql          # Star schema table definitions
 ├── 6-spark/                  # Spark cluster and ETL jobs
+│   ├── docker-compose.yml    # Spark cluster services
+│   ├── Dockerfile            # Spark image definition
+│   ├── conf/
+│   │   └── spark-defaults.conf # Spark configuration
 │   └── scripts/
-│       ├── northwind-ch-stg.py    # CDC streaming job
-│       ├── northwind-dw.py        # Star schema builder (incremental processing)
-│       └── norhwind_schemas.py    # Debezium schema definitions
-├── checks.md                 # Pipeline diagnostic checklist
-├── pipeline_review_report.md # Comprehensive architecture review
-└── test_data_verification_summary.md # Test data validation results
+│       ├── northwind-ch-stg.py    # CDC streaming job (Kafka → ClickHouse staging)
+│       ├── northwind-dw.py        # Star schema builder (incremental ETL)
+│       ├── northwind_schemas.py   # Debezium schema definitions
+│       └── clickhouse-jdbc-0.7.2-all.jar # ClickHouse JDBC driver
+├── 7-grafana/                # Grafana monitoring and visualization
+│   ├── docker-compose.yml    # Grafana service configuration
+│   ├── Dockerfile            # Grafana image definition
+│   ├── northwind_queries.sql # Sample analytical queries
+│   ├── dashboards/           # Grafana dashboard JSON files
+│   └── provisioning/         # Grafana provisioning configuration
+│       ├── dashboards/
+│       └── datasources/
+├── LICENSE                   # Project license
+└── README.md                 # This file
 ```
 
 ## Components
@@ -99,28 +126,48 @@ northwind_stream_DW/
 - Source OLTP database with Northwind sample data
 - Configured with logical replication for CDC
 - Replication slot: `debezium`
+- Database: `northwind`
+- User: `postgres` / Password: `postgres`
 
-### Debezium Connect
-- Captures INSERT, UPDATE, DELETE operations
-- Publishes changes to Kafka topics
-- Topic naming: `northwind.public.<table_name>`
+### Zookeeper (Port 12181)
+- Coordination service for Kafka
+- Started as part of Kafka docker-compose
+- Also used by ClickHouse for replication coordination
 
-### Kafka
-- Ports: 39092, 29092
+### Kafka (Ports 39092, 29092)
+- Distributed streaming platform
 - Stores CDC events as topics
 - Topics are consumed by Spark streaming jobs
+- Topic naming: `northwind.public.<table_name>`
+- Depends on Zookeeper for coordination
+
+### Debezium Connect
+- Captures INSERT, UPDATE, DELETE operations from PostgreSQL
+- Publishes changes to Kafka topics
+- Connector name: `postgres-northwind-connector`
+- Uses PostgreSQL logical replication (pgoutput plugin)
 
 ### Spark Cluster
-- **Master**: Coordinates jobs
-- **Worker**: Executes tasks
-- **pyspark-job-cdc**: Streams CDC data from Kafka to ClickHouse staging
-- **pyspark-job-dw**: Incremental ETL from staging to data warehouse
+- **Master**: Coordinates jobs (spark-master)
+- **Worker**: Executes tasks (spark-worker)
+- **pyspark-job-cdc**: Streams CDC data from Kafka to ClickHouse staging tables
+- **pyspark-job-dw**: Incremental ETL from staging to data warehouse (star schema)
 
-### ClickHouse (Ports 18123, 28123)
-- **Staging Tables**: `northwind.*` (raw CDC data)
+### ClickHouse (Ports 18123, 28123, 19000, 29000)
+- **Replication**: 2 replicas (clickhouse1, clickhouse2) with Zookeeper coordination
+- **Cluster**: `replicated_cluster`
+- **Staging Tables**: `northwind.*` (raw CDC data with ReplacingMergeTree engine)
 - **Data Warehouse**: Star schema with dimensions and facts
   - **Dimensions**: DimGeography, DimCustomer, DimEmployees, DimSuppliers, DimProducts, DimShippers, DimTerritories, DimDate
   - **Facts**: FactOrders, FactEmployeeTerritories
+- **User**: `default` / Password: `123456`
+
+### Grafana (Port 3000)
+- **Dashboard**: Pre-configured dashboards for ClickHouse monitoring
+- **Data Source**: ClickHouse data warehouse
+- **Queries**: Sample analytical queries in `northwind_queries.sql`
+- **Default Credentials**: `admin` / `admin`
+- **URL**: http://localhost:3000
 
 ## Data Warehouse Schema
 
@@ -154,7 +201,12 @@ docker exec clickhouse1 clickhouse-client --query "SELECT COUNT(*) FROM northwin
 docker exec clickhouse1 clickhouse-client --query "SELECT COUNT(*) FROM FactOrders"
 ```
 
-For comprehensive verification steps, see `checks.md`.
+### Access Grafana Dashboard
+Open your browser and navigate to:
+```
+http://localhost:3000
+```
+Login with default credentials: `admin` / `admin`
 
 ## Monitoring
 
@@ -169,19 +221,14 @@ docker logs pyspark-job-dw --tail 50
 
 ### Check Container Health
 ```powershell
-docker ps --filter "name=postgres|kafka|debezium|clickhouse|spark" --format "table {{.Names}}\t{{.Status}}"
+docker ps 
 ```
-
-## Documentation
-
-- **[Pipeline Review Report](pipeline_review_report.md)**: Comprehensive architecture review, code analysis, and recommendations
-- **[Diagnostic Checklist](checks.md)**: Step-by-step validation procedures for each pipeline component
-- **[Test Data Verification](test_data_verification_summary.md)**: Test data insertion and pipeline validation results
 
 ## Stopping the Pipeline
 
-To stop all services:
+To stop all services (in reverse order):
 ```powershell
+docker-compose -f ./7-grafana/docker-compose.yml down
 docker-compose -f ./6-spark/docker-compose.yml down
 docker-compose -f ./5-clickhouse/docker-compose.yml down
 docker-compose -f ./4-debezium/docker-compose.yml down
@@ -196,9 +243,7 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 - ClickHouse uses ReplacingMergeTree for handling updates
 - The ETL job runs incrementally, processing only changed records based on `updatedate`
 
-## License
 
-See [LICENSE](LICENSE) file for details.
 
 ## Todo List
 
@@ -234,7 +279,7 @@ See [LICENSE](LICENSE) file for details.
 - [ ] Add data validation tests: Create tests to verify data consistency between source and target, referential integrity checks
 
 ### Documentation
-- [ ] Update README: Remove references to deleted files (`northwind-etl-dw.py`, `test.py`, `checks.md`, `pipeline_review_report.md`, `test_data_verification_summary.md`)
+- [x] Update README: Remove references to deleted files and update project structure
 - [ ] Add architecture diagrams: Create detailed architecture diagrams showing data flow, components, and interactions
 - [ ] Add data dictionary: Document all dimension and fact tables, their schemas, and relationships
 - [ ] Add deployment guide: Create detailed deployment guide with prerequisites, step-by-step instructions, and troubleshooting
