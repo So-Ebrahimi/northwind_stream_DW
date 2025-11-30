@@ -255,8 +255,6 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 - [ ] Fix SupplierKey mapping in northwind-dw.py - map supplier_id to SupplierKey from DimSuppliers
 - [ ] Fix employee_id type mismatch in northwind-dw.py - convert String to Integer for DimEmployees lookup
 - [ ] Add error handling and logging to Spark jobs (northwind-ch-stg.py and northwind-dw.py)
-- [ ] Implement FactEmployeeTerritories ETL process in northwind-dw.py
-- [ ] Review and fix CDC DELETE operation handling in pipeline
 - [ ] Move hardcoded credentials to environment variables
 - [ ] Add Docker health checks to all containers in docker-compose files
 - [ ] Create single startup script to start all services in correct order

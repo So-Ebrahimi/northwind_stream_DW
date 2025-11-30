@@ -32,7 +32,7 @@ def read_ch_table(table, where_clause=None):
         .option("dbtable", table)
     if where_clause:
         # use subquery to apply WHERE when driver needs
-        sql = f"(SELECT * FROM {table} WHERE {where_clause}) as t"
+        sql = f"(SELECT * FROM {table} WHERE {where_clause} ) as t"
         reader = reader.option("dbtable", sql)
     return reader.load()
 
@@ -127,7 +127,7 @@ def set_last_run(ts):
 
 # ---------------- transformations for dimensions ----------------
 def process_dim_customers(last_run):
-    where = f"updatedate > toDateTime('{last_run}')" 
+    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'" 
     df_changed = read_ch_table("northwind.northwind_customers", where)
     if df_changed.rdd.isEmpty():
         print("DimCustomer: no changes")
@@ -161,7 +161,7 @@ def process_dim_customers(last_run):
     print(f"DimCustomer: wrote {dim_customer.count()} rows")
 
 def process_dim_employees(last_run):
-    where = f"updatedate > toDateTime('{last_run}')"
+    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_employees", where)
     if df_changed.rdd.isEmpty():
         print("DimEmployees: no changes")
@@ -202,7 +202,7 @@ def process_dim_employees(last_run):
     print(f"DimEmployees: wrote {dim_emp.count()} rows")
 
 def process_dim_suppliers(last_run):
-    where = f"updatedate > toDateTime('{last_run}')"
+    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_suppliers", where)
     if df_changed.rdd.isEmpty():
         print("DimSuppliers: no changes")
@@ -236,7 +236,7 @@ def process_dim_suppliers(last_run):
     print(f"DimSuppliers: wrote {dim_sup.count()} rows")
 
 def process_dim_products(last_run):
-    where = f"p.updatedate > toDateTime('{last_run}')"
+    where = f"p.updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_products p", where)
     if df_changed.rdd.isEmpty():
         print("DimProducts: no changes")
@@ -275,7 +275,7 @@ def process_dim_products(last_run):
     print(f"DimProducts: wrote {dim_products.count()} rows")
 
 def process_dim_shippers(last_run):
-    where = f"updatedate > toDateTime('{last_run}')"
+    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_shippers", where)
     if df_changed.rdd.isEmpty():
         print("DimShippers: no changes")
@@ -293,7 +293,7 @@ def process_dim_shippers(last_run):
     print(f"DimShippers: wrote {dim_shippers.count()} rows")
 
 def process_dim_territories(last_run):
-    where = f"updatedate > toDateTime('{last_run}')"
+    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_territories", where)
     if df_changed.rdd.isEmpty():
         print("DimTerritories: no changes")
@@ -325,7 +325,7 @@ def process_dim_territories(last_run):
 
 # ---------------- Fact processing ----------------
 def process_fact_employee_territories(last_run):
-    where_clause = f"updatedate > toDateTime('{last_run}')"
+    where_clause = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_employee_territories", where_clause)
     if df_changed.rdd.isEmpty():
         print("FactEmployeeTerritories: no changes")
@@ -389,8 +389,8 @@ def process_fact_employee_territories(last_run):
 
 
 def process_fact_orders(last_run):
-    where_o = f"updatedate > toDateTime('{last_run}')"
-    where_od = f"updatedate > toDateTime('{last_run}')"
+    where_o = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+    where_od = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
     ods_changed = read_ch_table("northwind.northwind_order_details", where_od).select("order_id").distinct()
     changed_order_ids = orders_changed.union(ods_changed).distinct()
