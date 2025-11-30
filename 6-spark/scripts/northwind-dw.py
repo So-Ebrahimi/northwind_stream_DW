@@ -18,8 +18,6 @@ POLL_INTERVAL_SEC = 20
 
 spark = SparkSession.builder \
     .appName("northwind_incremental_etl") \
-    .master("local[*]") \
-    .config("spark.executor.memory", "2g") \
     .getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
 

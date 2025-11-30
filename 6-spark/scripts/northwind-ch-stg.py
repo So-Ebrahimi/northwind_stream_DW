@@ -3,9 +3,9 @@ from pyspark.sql.functions import col, from_json, get_json_object, when, lit, cu
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
 from northwind_schemas import * 
 from pyspark.sql.functions import expr, date_format
+
 spark = SparkSession.builder \
-    .appName("example") \
-    .master("local") \
+    .appName("northwind_ch_stg") \
     .getOrCreate()
 
 
