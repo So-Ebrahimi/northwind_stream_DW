@@ -66,7 +66,7 @@ def initialize_dim_date():
     Populates DimDate with dates 1970-01-01 .. 2050-12-31 on the first run.
     """
     if table_has_rows("DimDate"):
-        print("DimDate already populated - skipping initialization")
+        # print("DimDate already populated - skipping initialization")
         return
 
     start_date = datetime(1970, 1, 1)
@@ -128,7 +128,7 @@ def process_dim_customers(last_run):
     where = f"updatedate > toDateTime('{last_run}') and operation != 'd'" 
     df_changed = read_ch_table("northwind.northwind_customers", where)
     if df_changed.rdd.isEmpty():
-        print("DimCustomer: no changes")
+        # print("DimCustomer: no changes")
         return
     from pyspark.sql.functions import coalesce, lit
     df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
@@ -162,7 +162,7 @@ def process_dim_employees(last_run):
     where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_employees", where)
     if df_changed.rdd.isEmpty():
-        print("DimEmployees: no changes")
+        # print("DimEmployees: no changes")
         return
     from pyspark.sql.functions import coalesce, lit
     df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
@@ -203,7 +203,7 @@ def process_dim_suppliers(last_run):
     where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_suppliers", where)
     if df_changed.rdd.isEmpty():
-        print("DimSuppliers: no changes")
+        # print("DimSuppliers: no changes")
         return
     from pyspark.sql.functions import coalesce, lit
     df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
@@ -237,7 +237,7 @@ def process_dim_products(last_run):
     where = f"p.updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_products p", where)
     if df_changed.rdd.isEmpty():
-        print("DimProducts: no changes")
+        # print("DimProducts: no changes")
         return
     categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
     dim_suppliers = read_ch_table("DimSuppliers").select(
@@ -276,7 +276,7 @@ def process_dim_shippers(last_run):
     where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_shippers", where)
     if df_changed.rdd.isEmpty():
-        print("DimShippers: no changes")
+        # print("DimShippers: no changes")
         return
     dim_shippers = df_changed.withColumn("ShipperKey", expr("hash(shipper_id)")) \
         .withColumnRenamed("shipper_id","ShipperAlternateKey") \
@@ -294,7 +294,7 @@ def process_dim_territories(last_run):
     where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_territories", where)
     if df_changed.rdd.isEmpty():
-        print("DimTerritories: no changes")
+        # print("DimTerritories: no changes")
         return
     regions = read_ch_table("northwind.northwind_region").select(
         col("region_id"),
@@ -326,7 +326,7 @@ def process_fact_employee_territories(last_run):
     where_clause = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
     df_changed = read_ch_table("northwind.northwind_employee_territories", where_clause)
     if df_changed.rdd.isEmpty():
-        print("FactEmployeeTerritories: no changes")
+        # print("FactEmployeeTerritories: no changes")
         return
 
     try:
@@ -387,13 +387,13 @@ def process_fact_employee_territories(last_run):
 
 
 def process_fact_orders(last_run):
-    where_o = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
-    where_od = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+    where_o = f"updatedate > toDateTime('{last_run}')"
+    where_od = f"updatedate > toDateTime('{last_run}')"
     orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
     ods_changed = read_ch_table("northwind.northwind_order_details", where_od).select("order_id").distinct()
     changed_order_ids = orders_changed.union(ods_changed).distinct()
     if changed_order_ids.rdd.isEmpty():
-        print("FactOrders: no changed orders")
+        # print("FactOrders: no changed orders")
         return
 
     changed_ids_list = [r["order_id"] for r in changed_order_ids.collect()]

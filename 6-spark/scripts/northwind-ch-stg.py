@@ -66,39 +66,47 @@ def transformDate(final_df, dateColumns):
 
 streams = []
 
+def foreach_batch_factory(table_name):
+    def foreach_batch(batch_df, batch_id):
+        row_count = batch_df.count()
+        print(f"Batch {batch_id} for table {table_name}: {row_count} rows updated")
+
+        (batch_df.write
+            .format("jdbc")
+            .option("driver", driver)
+            .option("url", url)
+            .option("user", user)
+            .option("password", password)
+            .option("dbtable", table_name)
+            .mode("append")           
+            .save()
+        )
+    return foreach_batch
+
+
 for short_name, (table, topic, schema) in table_mapping.items():
+    
     df = readDataFromTopics(topic, schema)
     transformed_df = transformDebeziumPayload(df)
-    if table=="northwind.northwind_employees" : 
-        transformed_df = transformDate(transformed_df , ["birth_date","hire_date"])
-    elif table=="northwind.northwind_orders" : 
-        transformed_df = transformDate(transformed_df , ["order_date","required_date","shipped_date"])    
 
-    def foreach_batch(batch_df, batch_id, table_name=table):
-        row_count = batch_df.count()  
-        print(f"Batch {batch_id} for table {table_name}: {row_count} rows updated")
-        
-        batch_df.write \
-            .format("jdbc") \
-            .option("driver", driver) \
-            .option("url", url) \
-            .option("user", user) \
-            .option("password", password) \
-            .option("dbtable", table_name) \
-            .mode("append") \
-            .save()
+    if table == "northwind.northwind_employees":
+        transformed_df = transformDate(transformed_df, ["birth_date", "hire_date"])
+
+    elif table == "northwind.northwind_orders":
+        transformed_df = transformDate(transformed_df, ["order_date", "required_date", "shipped_date"])
 
     stream = (
         transformed_df.writeStream
-        .foreachBatch(foreach_batch)
-        .outputMode("append")
-        .option("checkpointLocation", f"/tmp/spark_checkpoints/{table}")  
+        .foreachBatch(foreach_batch_factory(table))    
+        .option("checkpointLocation", f"/tmp/spark_checkpoints/{table}")
         .start()
     )
 
     streams.append(stream)
 
+
 for stream in streams:
     stream.awaitTermination()
+
 
     

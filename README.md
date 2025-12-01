@@ -173,7 +173,7 @@ Data-pipeline-for-northwind/
 - **Data Source**: ClickHouse data warehouse
 - **Queries**: Sample analytical queries in `northwind_queries.sql`
 - **Default Credentials**: `admin` / `admin`
-- **URL**: http://localhost:3000
+- **URL**: http://localhost:12345
 
 ## Data Warehouse Schema
 
@@ -210,7 +210,7 @@ docker exec clickhouse1 clickhouse-client --query "SELECT COUNT(*) FROM FactOrde
 ### Access Grafana Dashboard
 Open your browser and navigate to:
 ```
-http://localhost:3000
+http://localhost:12345
 ```
 Login with default credentials: `admin` / `admin`
 
