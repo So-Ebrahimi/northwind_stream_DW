@@ -1,6 +1,6 @@
 # incremental_etl.py
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import TimestampType
@@ -114,7 +114,7 @@ def initialize_dim_date():
 
 def get_last_run():
     if not os.path.exists(LAST_RUN_FILE):
-        start = (datetime.utcnow() - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
+        start = (datetime.now(timezone.utc) - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
         return start
     with open(LAST_RUN_FILE, "r") as f:
         return f.read().strip()
@@ -439,15 +439,22 @@ def process_fact_orders(last_run):
             col("o.updatedate").alias("updatedate")
         )
 
+    # Filter out rows with NULL dimension keys (required by ClickHouse schema)
+    fact = fact.dropna(subset=["CustomerKey", "EmployeeKey", "ProductKey", "ShipperKey"])
+    
+    row_count = fact.count()
+    if row_count == 0:
+        print("FactOrders: nothing to write after filtering NULL dimension keys")
+        return
 
     write_ch_table(fact, "FactOrders")
-    print(f"FactOrders: wrote {fact.count()} rows")
+    print(f"FactOrders: wrote {row_count} rows")
 
 # ---------------- main run ----------------
 def main_once():
     last_run = get_last_run()
     print("last_run =", last_run)
-    now_ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # ensure static dimensions are seeded
     initialize_dim_date()
