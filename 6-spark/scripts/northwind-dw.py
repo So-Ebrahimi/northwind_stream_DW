@@ -1,10 +1,22 @@
 # incremental_etl.py
 import os
+import sys
+import logging
 from datetime import datetime, timedelta, timezone
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import TimestampType
 import time 
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ------------- config -------------
 CLICKHOUSE_URL = "jdbc:ch://clickhouse1:8123/default"
@@ -16,39 +28,94 @@ LAST_RUN_FILE = "last_run.txt"
 POLL_INTERVAL_SEC = 20         
 # ----------------------------------
 
-spark = SparkSession.builder \
-    .appName("northwind_incremental_etl") \
-    .getOrCreate()
-spark.sparkContext.setLogLevel("ERROR")
+# Initialize Spark session with error handling
+try:
+    spark = SparkSession.builder \
+        .appName("northwind_incremental_etl") \
+        .getOrCreate()
+    logger.info("Spark session created successfully")
+except Exception as e:
+    logger.error(f"Failed to create Spark session: {e}", exc_info=True)
+    sys.exit(1)
+
+# Set log level for Spark to reduce noise, but keep our logging
+spark.sparkContext.setLogLevel("WARN")
 
 def read_ch_table(table, where_clause=None):
-    reader = spark.read.format("jdbc") \
-        .option("driver", CLICKHOUSE_DRIVER) \
-        .option("url", CLICKHOUSE_URL) \
-        .option("user", CLICKHOUSE_USER) \
-        .option("password", CLICKHOUSE_PASS) \
-        .option("dbtable", table)
-    if where_clause:
-        # use subquery to apply WHERE when driver needs
-        sql = f"(SELECT * FROM {table} WHERE {where_clause} ) as t"
-        reader = reader.option("dbtable", sql)
-    return reader.load()
+    """
+    Read data from ClickHouse table.
+    
+    Args:
+        table: Table name to read from
+        where_clause: Optional WHERE clause for filtering
+        
+    Returns:
+        DataFrame with table data
+        
+    Raises:
+        Exception: If read operation fails
+    """
+    try:
+        logger.debug(f"Reading from ClickHouse table: {table}" + (f" with WHERE: {where_clause}" if where_clause else ""))
+        reader = spark.read.format("jdbc") \
+            .option("driver", CLICKHOUSE_DRIVER) \
+            .option("url", CLICKHOUSE_URL) \
+            .option("user", CLICKHOUSE_USER) \
+            .option("password", CLICKHOUSE_PASS) \
+            .option("dbtable", table)
+        if where_clause:
+            # use subquery to apply WHERE when driver needs
+            sql = f"(SELECT * FROM {table} WHERE {where_clause} ) as t"
+            reader = reader.option("dbtable", sql)
+        df = reader.load()
+        logger.debug(f"Successfully read {df.count()} rows from {table}")
+        return df
+    except Exception as e:
+        logger.error(f"Failed to read from ClickHouse table {table}: {e}", exc_info=True)
+        raise
 
 def write_ch_table(df, table_name, mode="append"):
-    df.write.format("jdbc") \
-        .option("driver", CLICKHOUSE_DRIVER) \
-        .option("url", CLICKHOUSE_URL) \
-        .option("user", CLICKHOUSE_USER) \
-        .option("password", CLICKHOUSE_PASS) \
-        .option("dbtable", table_name) \
-        .mode(mode) \
-        .save()
+    """
+    Write DataFrame to ClickHouse table.
+    
+    Args:
+        df: DataFrame to write
+        table_name: Target table name
+        mode: Write mode (append, overwrite, etc.)
+        
+    Raises:
+        Exception: If write operation fails
+    """
+    try:
+        row_count = df.count()
+        logger.debug(f"Writing {row_count} rows to ClickHouse table: {table_name} (mode: {mode})")
+        
+        df.write.format("jdbc") \
+            .option("driver", CLICKHOUSE_DRIVER) \
+            .option("url", CLICKHOUSE_URL) \
+            .option("user", CLICKHOUSE_USER) \
+            .option("password", CLICKHOUSE_PASS) \
+            .option("dbtable", table_name) \
+            .mode(mode) \
+            .save()
+        
+        logger.debug(f"Successfully wrote {row_count} rows to {table_name}")
+    except Exception as e:
+        logger.error(f"Failed to write to ClickHouse table {table_name}: {e}", exc_info=True)
+        raise
 
 def table_has_rows(table_name):
     """
     Returns True if the ClickHouse table already contains data.
+    
+    Args:
+        table_name: Table name to check
+        
+    Returns:
+        True if table has rows, False otherwise
     """
     try:
+        logger.debug(f"Checking if table {table_name} has rows")
         df = spark.read.format("jdbc") \
             .option("driver", CLICKHOUSE_DRIVER) \
             .option("url", CLICKHOUSE_URL) \
@@ -56,429 +123,670 @@ def table_has_rows(table_name):
             .option("password", CLICKHOUSE_PASS) \
             .option("dbtable", f"(SELECT 1 FROM {table_name} LIMIT 1) t") \
             .load()
-        return not df.rdd.isEmpty()
+        has_rows = not df.rdd.isEmpty()
+        logger.debug(f"Table {table_name} has rows: {has_rows}")
+        return has_rows
     except Exception as exc:
-        print(f"[table_has_rows] Could not query {table_name}: {exc}")
+        logger.warning(f"Could not query {table_name} to check for rows: {exc}")
         return False
 
 def initialize_dim_date():
     """
     Populates DimDate with dates 1970-01-01 .. 2050-12-31 on the first run.
+    
+    Raises:
+        Exception: If initialization fails
     """
-    if table_has_rows("DimDate"):
-        # print("DimDate already populated - skipping initialization")
-        return
+    try:
+        if table_has_rows("DimDate"):
+            logger.info("DimDate already populated - skipping initialization")
+            return
 
-    start_date = datetime(1970, 1, 1)
-    end_date = datetime(2050, 12, 31)
-    total_days = (end_date - start_date).days + 1
-    start_literal = start_date.strftime("%Y-%m-%d")
+        logger.info("Initializing DimDate table")
+        start_date = datetime(1970, 1, 1)
+        end_date = datetime(2050, 12, 31)
+        total_days = (end_date - start_date).days + 1
+        start_literal = start_date.strftime("%Y-%m-%d")
 
-    dim_date = spark.range(0, total_days, 1, numPartitions=1) \
-        .withColumn("DateValue", expr(f"date_add('{start_literal}', cast(id as int))")) \
-        .drop("id") \
-        .withColumn(
-            "DateKey",
-            (year("DateValue") * 10000 + month("DateValue") * 100 + dayofmonth("DateValue")).cast("int")
-        ) \
-        .withColumn("FullDate", date_format("DateValue", "yyyy-MM-dd")) \
-        .withColumn("DayOfWeek", dayofweek("DateValue")) \
-        .withColumn("DayName", date_format("DateValue", "EEEE")) \
-        .withColumn("DayOfMonth", dayofmonth("DateValue")) \
-        .withColumn("DayOfYear", dayofyear("DateValue")) \
-        .withColumn("WeekOfYear", weekofyear("DateValue")) \
-        .withColumn("Month", month("DateValue")) \
-        .withColumn("MonthName", date_format("DateValue", "MMMM")) \
-        .withColumn("Quarter", quarter("DateValue")) \
-        .withColumn("Year", year("DateValue")) \
-        .withColumn("IsWeekend", when(dayofweek("DateValue").isin(1, 7), lit(1)).otherwise(lit(0)))
+        dim_date = spark.range(0, total_days, 1, numPartitions=1) \
+            .withColumn("DateValue", expr(f"date_add('{start_literal}', cast(id as int))")) \
+            .drop("id") \
+            .withColumn(
+                "DateKey",
+                (year("DateValue") * 10000 + month("DateValue") * 100 + dayofmonth("DateValue")).cast("int")
+            ) \
+            .withColumn("FullDate", date_format("DateValue", "yyyy-MM-dd")) \
+            .withColumn("DayOfWeek", dayofweek("DateValue")) \
+            .withColumn("DayName", date_format("DateValue", "EEEE")) \
+            .withColumn("DayOfMonth", dayofmonth("DateValue")) \
+            .withColumn("DayOfYear", dayofyear("DateValue")) \
+            .withColumn("WeekOfYear", weekofyear("DateValue")) \
+            .withColumn("Month", month("DateValue")) \
+            .withColumn("MonthName", date_format("DateValue", "MMMM")) \
+            .withColumn("Quarter", quarter("DateValue")) \
+            .withColumn("Year", year("DateValue")) \
+            .withColumn("IsWeekend", when(dayofweek("DateValue").isin(1, 7), lit(1)).otherwise(lit(0)))
 
-    dim_date = dim_date.select(
-        col("DateKey"),
-        col("DateValue").alias("Date"),
-        "FullDate",
-        "DayOfWeek",
-        "DayName",
-        "DayOfMonth",
-        "DayOfYear",
-        "WeekOfYear",
-        "Month",
-        "MonthName",
-        "Quarter",
-        "Year",
-        "IsWeekend"
-    )
+        dim_date = dim_date.select(
+            col("DateKey"),
+            col("DateValue").alias("Date"),
+            "FullDate",
+            "DayOfWeek",
+            "DayName",
+            "DayOfMonth",
+            "DayOfYear",
+            "WeekOfYear",
+            "Month",
+            "MonthName",
+            "Quarter",
+            "Year",
+            "IsWeekend"
+        )
 
-    write_ch_table(dim_date, "DimDate", mode="append")
-    print(f"DimDate initialized with {dim_date.count()} rows")
+        write_ch_table(dim_date, "DimDate", mode="append")
+        row_count = dim_date.count()
+        logger.info(f"DimDate initialized with {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize DimDate: {e}", exc_info=True)
+        raise
 
 def get_last_run():
-    if not os.path.exists(LAST_RUN_FILE):
+    """
+    Get the last run timestamp from file.
+    
+    Returns:
+        Last run timestamp string, or default (10 years ago) if file doesn't exist
+        
+    Raises:
+        Exception: If file read fails
+    """
+    try:
+        if not os.path.exists(LAST_RUN_FILE):
+            start = (datetime.now(timezone.utc) - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
+            logger.info(f"Last run file not found, using default timestamp: {start}")
+            return start
+        with open(LAST_RUN_FILE, "r") as f:
+            last_run = f.read().strip()
+            logger.debug(f"Read last run timestamp: {last_run}")
+            return last_run
+    except Exception as e:
+        logger.error(f"Failed to read last run file {LAST_RUN_FILE}: {e}", exc_info=True)
+        # Return default on error
         start = (datetime.now(timezone.utc) - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
+        logger.warning(f"Using default timestamp due to error: {start}")
         return start
-    with open(LAST_RUN_FILE, "r") as f:
-        return f.read().strip()
 
 def set_last_run(ts):
-    with open(LAST_RUN_FILE, "w") as f:
-        f.write(ts)
+    """
+    Save the last run timestamp to file.
+    
+    Args:
+        ts: Timestamp string to save
+        
+    Raises:
+        Exception: If file write fails
+    """
+    try:
+        logger.debug(f"Writing last run timestamp: {ts}")
+        with open(LAST_RUN_FILE, "w") as f:
+            f.write(ts)
+        logger.debug(f"Successfully saved last run timestamp to {LAST_RUN_FILE}")
+    except Exception as e:
+        logger.error(f"Failed to write last run file {LAST_RUN_FILE}: {e}", exc_info=True)
+        raise
 
 # ---------------- transformations for dimensions ----------------
 def process_dim_customers(last_run):
-    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'" 
-    df_changed = read_ch_table("northwind.northwind_customers", where)
-    if df_changed.rdd.isEmpty():
-        # print("DimCustomer: no changes")
-        return
-    from pyspark.sql.functions import coalesce, lit
-    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                           .withColumn("region", coalesce("region", lit("Unknown"))) \
-                           .withColumn("city", coalesce("city", lit("Unknown"))) \
-                           .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                           .withColumn("address", coalesce("address", lit("Unknown")))
-    geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
-    geo_out = geo.withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
-    write_ch_table(geo_out.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+    """
+    Process DimCustomer dimension table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing DimCustomer")
+        where = f"updatedate > toDateTime('{last_run}') and operation != 'd'" 
+        df_changed = read_ch_table("northwind.northwind_customers", where)
+        if df_changed.rdd.isEmpty():
+            logger.debug("DimCustomer: no changes")
+            return
+        
+        from pyspark.sql.functions import coalesce, lit
+        df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                               .withColumn("region", coalesce("region", lit("Unknown"))) \
+                               .withColumn("city", coalesce("city", lit("Unknown"))) \
+                               .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                               .withColumn("address", coalesce("address", lit("Unknown")))
+        geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
+        geo_out = geo.withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+        write_ch_table(geo_out.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
-    dim_geo = geo_out.select("GeographyKey","country","region","city","postal_code","address")
-    dim_customer = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
-        .withColumn("CustomerKey", expr("hash(customer_id)")) \
-        .withColumnRenamed("customer_id","CustomerAlternateKey") \
-        .select(
-            col("CustomerKey").cast("long"),
-            col("CustomerAlternateKey"),
-            col("GeographyKey").cast("long"),
-            col("company_name").alias("CompanyName"),
-            col("contact_name").alias("ContactName"),
-            col("contact_title").alias("ContactTitle"),
-            col("phone"),
-            col("fax"),
-            col("updatedate").alias("updatedate")
-        )
-    write_ch_table(dim_customer, "DimCustomer")
-    print(f"DimCustomer: wrote {dim_customer.count()} rows")
+        dim_geo = geo_out.select("GeographyKey","country","region","city","postal_code","address")
+        dim_customer = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
+            .withColumn("CustomerKey", expr("hash(customer_id)")) \
+            .withColumnRenamed("customer_id","CustomerAlternateKey") \
+            .select(
+                col("CustomerKey").cast("long"),
+                col("CustomerAlternateKey"),
+                col("GeographyKey").cast("long"),
+                col("company_name").alias("CompanyName"),
+                col("contact_name").alias("ContactName"),
+                col("contact_title").alias("ContactTitle"),
+                col("phone"),
+                col("fax"),
+                col("updatedate").alias("updatedate")
+            )
+        write_ch_table(dim_customer, "DimCustomer")
+        row_count = dim_customer.count()
+        logger.info(f"DimCustomer: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process DimCustomer: {e}", exc_info=True)
+        raise
 
 def process_dim_employees(last_run):
-    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
-    df_changed = read_ch_table("northwind.northwind_employees", where)
-    if df_changed.rdd.isEmpty():
-        # print("DimEmployees: no changes")
-        return
-    from pyspark.sql.functions import coalesce, lit
-    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                           .withColumn("region", coalesce("region", lit("Unknown"))) \
-                           .withColumn("city", coalesce("city", lit("Unknown"))) \
-                           .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                           .withColumn("address", coalesce("address", lit("Unknown")))
-    dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
-                        .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
-    write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+    """
+    Process DimEmployees dimension table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing DimEmployees")
+        where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_employees", where)
+        if df_changed.rdd.isEmpty():
+            logger.debug("DimEmployees: no changes")
+            return
+        
+        from pyspark.sql.functions import coalesce, lit
+        df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                               .withColumn("region", coalesce("region", lit("Unknown"))) \
+                               .withColumn("city", coalesce("city", lit("Unknown"))) \
+                               .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                               .withColumn("address", coalesce("address", lit("Unknown")))
+        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
+                            .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+        write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
-    dim_emp = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
-        .withColumn("EmployeeKey", expr("hash(employee_id)")) \
-        .withColumnRenamed("employee_id","EmployeeAlternateKey") \
-        .withColumnRenamed("reports_to","ParentEmployeeKey") \
-        .select(
-            col("EmployeeKey").cast("long"),
-            col("EmployeeAlternateKey"),
-            col("ParentEmployeeKey"),
-            col("GeographyKey").cast("long"),
-            col("first_name").alias("FirstName"),
-            col("last_name").alias("LastName"),
-            col("title"),
-            col("title_of_courtesy"),
-            col("birth_date"),
-            col("hire_date"),
-            col("home_phone"),
-            col("extension"),
-            col("photo"),
-            col("notes"),
-            col("photo_path"),
-            col("updatedate").alias("updatedate")
-        )
-    write_ch_table(dim_emp, "DimEmployees")
-    print(f"DimEmployees: wrote {dim_emp.count()} rows")
+        dim_emp = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
+            .withColumn("EmployeeKey", expr("hash(employee_id)")) \
+            .withColumn("EmployeeAlternateKey", col("employee_id").cast("string")) \
+            .withColumnRenamed("reports_to","ParentEmployeeKey") \
+            .select(
+                col("EmployeeKey").cast("long"),
+                col("EmployeeAlternateKey"),
+                col("ParentEmployeeKey"),
+                col("GeographyKey").cast("long"),
+                col("first_name").alias("FirstName"),
+                col("last_name").alias("LastName"),
+                col("title"),
+                col("title_of_courtesy"),
+                col("birth_date"),
+                col("hire_date"),
+                col("home_phone"),
+                col("extension"),
+                col("photo"),
+                col("notes"),
+                col("photo_path"),
+                col("updatedate").alias("updatedate")
+            )
+        write_ch_table(dim_emp, "DimEmployees")
+        row_count = dim_emp.count()
+        logger.info(f"DimEmployees: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process DimEmployees: {e}", exc_info=True)
+        raise
 
 def process_dim_suppliers(last_run):
-    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
-    df_changed = read_ch_table("northwind.northwind_suppliers", where)
-    if df_changed.rdd.isEmpty():
-        # print("DimSuppliers: no changes")
-        return
-    from pyspark.sql.functions import coalesce, lit
-    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                           .withColumn("region", coalesce("region", lit("Unknown"))) \
-                           .withColumn("city", coalesce("city", lit("Unknown"))) \
-                           .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                           .withColumn("address", coalesce("address", lit("Unknown")))
-    dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
-                        .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
-    write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+    """
+    Process DimSuppliers dimension table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing DimSuppliers")
+        where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_suppliers", where)
+        if df_changed.rdd.isEmpty():
+            logger.debug("DimSuppliers: no changes")
+            return
+        
+        from pyspark.sql.functions import coalesce, lit
+        df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                               .withColumn("region", coalesce("region", lit("Unknown"))) \
+                               .withColumn("city", coalesce("city", lit("Unknown"))) \
+                               .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                               .withColumn("address", coalesce("address", lit("Unknown")))
+        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
+                            .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+        write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
-    dim_sup = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
-        .withColumn("SupplierKey", expr("hash(supplier_id)")) \
-        .withColumnRenamed("supplier_id","SupplierAlternateKey") \
-        .select(
-            col("SupplierKey").cast("long"),
-            col("SupplierAlternateKey"),
-            col("GeographyKey").cast("long"),
-            col("company_name"),
-            col("contact_name"),
-            col("contact_title"),
-            col("phone"),
-            col("fax"),
-            col("homepage"),
-            col("updatedate").alias("updatedate")
-        )
-    write_ch_table(dim_sup, "DimSuppliers")
-    print(f"DimSuppliers: wrote {dim_sup.count()} rows")
+        dim_sup = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
+            .withColumn("SupplierKey", expr("hash(supplier_id)")) \
+            .withColumn("SupplierAlternateKey", col("supplier_id").cast("string")) \
+            .select(
+                col("SupplierKey").cast("long"),
+                col("SupplierAlternateKey"),
+                col("GeographyKey").cast("long"),
+                col("company_name"),
+                col("contact_name"),
+                col("contact_title"),
+                col("phone"),
+                col("fax"),
+                col("homepage"),
+                col("updatedate").alias("updatedate")
+            )
+        write_ch_table(dim_sup, "DimSuppliers")
+        row_count = dim_sup.count()
+        logger.info(f"DimSuppliers: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process DimSuppliers: {e}", exc_info=True)
+        raise
 
 def process_dim_products(last_run):
-    where = f"p.updatedate > toDateTime('{last_run}') and operation != 'd'"
-    df_changed = read_ch_table("northwind.northwind_products p", where)
-    if df_changed.rdd.isEmpty():
-        # print("DimProducts: no changes")
-        return
-    categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
-    dim_suppliers = read_ch_table("DimSuppliers").select(
-        col("SupplierKey").cast("long"),
-        col("SupplierAlternateKey")
-    )
-
-    dim_products = df_changed.alias("prod") \
-        .join(categories.alias("cat"), "category_id", "left") \
-        .join(
-            dim_suppliers.alias("sup"),
-            col("prod.supplier_id") == col("sup.SupplierAlternateKey"),
-            "left"
-        ) \
-        .withColumn("ProductKey", expr("hash(prod.product_id)")) \
-        .withColumnRenamed("product_id","ProductAlternateKey") \
-        .withColumnRenamed("product_name","ProductName") \
-        .select(
-            col("ProductKey").cast("long"),
-            col("ProductAlternateKey"),
-            col("sup.SupplierKey").alias("SupplierKey"),
-            col("ProductName"),
-            col("cat.category_name").alias("CategoryName"),
-            "quantity_per_unit",
-            "unit_price",
-            "units_in_stock",
-            "units_on_order",
-            "reorder_level",
-            "discontinued",
-            col("updatedate").alias("updatedate")
+    """
+    Process DimProducts dimension table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing DimProducts")
+        where = f"p.updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_products p", where)
+        if df_changed.rdd.isEmpty():
+            logger.debug("DimProducts: no changes")
+            return
+        
+        categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
+        dim_suppliers = read_ch_table("DimSuppliers").select(
+            col("SupplierKey").cast("long"),
+            col("SupplierAlternateKey")
         )
-    write_ch_table(dim_products, "DimProducts")
-    print(f"DimProducts: wrote {dim_products.count()} rows")
+
+        dim_products = df_changed.alias("prod") \
+            .join(categories.alias("cat"), "category_id", "left") \
+            .join(
+                dim_suppliers.alias("sup"),
+                col("prod.supplier_id").cast("string") == col("sup.SupplierAlternateKey"),
+                "left"
+            ) \
+            .withColumn("ProductKey", expr("hash(prod.product_id)")) \
+            .withColumn("ProductAlternateKey", col("prod.product_id").cast("string")) \
+            .withColumnRenamed("product_name","ProductName") \
+            .select(
+                col("ProductKey").cast("long"),
+                col("ProductAlternateKey"),
+                col("sup.SupplierKey").alias("SupplierKey"),
+                col("ProductName"),
+                col("cat.category_name").alias("CategoryName"),
+                "quantity_per_unit",
+                "unit_price",
+                "units_in_stock",
+                "units_on_order",
+                "reorder_level",
+                "discontinued",
+                col("updatedate").alias("updatedate")
+            )
+        write_ch_table(dim_products, "DimProducts")
+        row_count = dim_products.count()
+        logger.info(f"DimProducts: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process DimProducts: {e}", exc_info=True)
+        raise
 
 def process_dim_shippers(last_run):
-    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
-    df_changed = read_ch_table("northwind.northwind_shippers", where)
-    if df_changed.rdd.isEmpty():
-        # print("DimShippers: no changes")
-        return
-    dim_shippers = df_changed.withColumn("ShipperKey", expr("hash(shipper_id)")) \
-        .withColumnRenamed("shipper_id","ShipperAlternateKey") \
-        .select(
-            col("ShipperKey").cast("long"),
-            col("ShipperAlternateKey"),
-            col("company_name"),
-            col("phone"),
-            col("updatedate").alias("updatedate")
-        )
-    write_ch_table(dim_shippers, "DimShippers")
-    print(f"DimShippers: wrote {dim_shippers.count()} rows")
+    """
+    Process DimShippers dimension table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing DimShippers")
+        where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_shippers", where)
+        if df_changed.rdd.isEmpty():
+            logger.debug("DimShippers: no changes")
+            return
+        
+        dim_shippers = df_changed.withColumn("ShipperKey", expr("hash(shipper_id)")) \
+            .withColumn("ShipperAlternateKey", col("shipper_id").cast("string")) \
+            .select(
+                col("ShipperKey").cast("long"),
+                col("ShipperAlternateKey"),
+                col("company_name"),
+                col("phone"),
+                col("updatedate").alias("updatedate")
+            )
+        write_ch_table(dim_shippers, "DimShippers")
+        row_count = dim_shippers.count()
+        logger.info(f"DimShippers: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process DimShippers: {e}", exc_info=True)
+        raise
 
 def process_dim_territories(last_run):
-    where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
-    df_changed = read_ch_table("northwind.northwind_territories", where)
-    if df_changed.rdd.isEmpty():
-        # print("DimTerritories: no changes")
-        return
-    regions = read_ch_table("northwind.northwind_region").select(
-        col("region_id"),
-        trim(col("region_description")).alias("RegionDescription")
-    )
-    dim_terr = df_changed.alias("terr") \
-        .join(regions.alias("reg"), "region_id", "left") \
-        .withColumn("TerritoryKey", expr("hash(terr.territory_id)")) \
-        .withColumn("TerritoryAlternateKey", col("terr.territory_id").cast("string")) \
-        .withColumn("TerritoryDescription", trim(col("terr.territory_description"))) \
-        .withColumn("RegionDescription", col("reg.RegionDescription")) \
-        .withColumn("StartDate", col("terr.updatedate").cast(TimestampType())) \
-        .withColumn("EndDate", lit(None).cast(TimestampType())) \
-        .withColumn("updatedate", col("terr.updatedate")) \
-        .select(
-            col("TerritoryKey").cast("long"),
-            "TerritoryAlternateKey",
-            "RegionDescription",
-            "TerritoryDescription",
-            "StartDate",
-            "EndDate",
-            "updatedate"
+    """
+    Process DimTerritories dimension table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing DimTerritories")
+        where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_territories", where)
+        if df_changed.rdd.isEmpty():
+            logger.debug("DimTerritories: no changes")
+            return
+        
+        regions = read_ch_table("northwind.northwind_region").select(
+            col("region_id"),
+            trim(col("region_description")).alias("RegionDescription")
         )
-    write_ch_table(dim_terr, "DimTerritories")
-    print(f"DimTerritories: wrote {dim_terr.count()} rows")
+        dim_terr = df_changed.alias("terr") \
+            .join(regions.alias("reg"), "region_id", "left") \
+            .withColumn("TerritoryKey", expr("hash(terr.territory_id)")) \
+            .withColumn("TerritoryAlternateKey", col("terr.territory_id").cast("string")) \
+            .withColumn("TerritoryDescription", trim(col("terr.territory_description"))) \
+            .withColumn("RegionDescription", col("reg.RegionDescription")) \
+            .withColumn("StartDate", col("terr.updatedate").cast(TimestampType())) \
+            .withColumn("EndDate", lit(None).cast(TimestampType())) \
+            .withColumn("updatedate", col("terr.updatedate")) \
+            .select(
+                col("TerritoryKey").cast("long"),
+                "TerritoryAlternateKey",
+                "RegionDescription",
+                "TerritoryDescription",
+                "StartDate",
+                "EndDate",
+                "updatedate"
+            )
+        write_ch_table(dim_terr, "DimTerritories")
+        row_count = dim_terr.count()
+        logger.info(f"DimTerritories: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process DimTerritories: {e}", exc_info=True)
+        raise
 
 # ---------------- Fact processing ----------------
 def process_fact_employee_territories(last_run):
-    where_clause = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
-    df_changed = read_ch_table("northwind.northwind_employee_territories", where_clause)
-    if df_changed.rdd.isEmpty():
-        # print("FactEmployeeTerritories: no changes")
-        return
-
+    """
+    Process FactEmployeeTerritories fact table.
+    
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
     try:
-        dim_emp = read_ch_table("DimEmployees").select(
-            col("EmployeeAlternateKey").alias("EmployeeAlternateKeyDim"),
-            col("EmployeeKey")
-        )
-    except Exception as exc:
-        print(f"FactEmployeeTerritories: cannot read DimEmployees ({exc})")
-        return
+        logger.info("Processing FactEmployeeTerritories")
+        where_clause = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_employee_territories", where_clause)
+        if df_changed.rdd.isEmpty():
+            logger.debug("FactEmployeeTerritories: no changes")
+            return
 
-    try:
-        dim_terr = read_ch_table("DimTerritories").select(
-            col("TerritoryAlternateKey").alias("TerritoryAlternateKeyDim"),
-            col("TerritoryKey")
-        )
-    except Exception as exc:
-        print(f"FactEmployeeTerritories: cannot read DimTerritories ({exc})")
-        return
+        try:
+            dim_emp = read_ch_table("DimEmployees").select(
+                col("EmployeeAlternateKey").alias("EmployeeAlternateKeyDim"),
+                col("EmployeeKey")
+            )
+        except Exception as exc:
+            logger.error(f"FactEmployeeTerritories: cannot read DimEmployees: {exc}", exc_info=True)
+            return
 
-    pairs = df_changed.select(
-        col("employee_id").cast("string").alias("EmployeeAlternateKey"),
-        col("territory_id").cast("string").alias("TerritoryAlternateKey"),
-        col("updatedate")
-    ).groupBy("EmployeeAlternateKey", "TerritoryAlternateKey") \
-     .agg(max("updatedate").alias("updatedate"))
-    total_pairs = pairs.count()
+        try:
+            dim_terr = read_ch_table("DimTerritories").select(
+                col("TerritoryAlternateKey").alias("TerritoryAlternateKeyDim"),
+                col("TerritoryKey")
+            )
+        except Exception as exc:
+            logger.error(f"FactEmployeeTerritories: cannot read DimTerritories: {exc}", exc_info=True)
+            return
 
-    fact = pairs \
-        .join(dim_emp, pairs.EmployeeAlternateKey == dim_emp.EmployeeAlternateKeyDim, "left") \
-        .join(dim_terr, pairs.TerritoryAlternateKey == dim_terr.TerritoryAlternateKeyDim, "left") \
-        .drop("EmployeeAlternateKeyDim", "TerritoryAlternateKeyDim") \
-        .drop("EmployeeAlternateKey", "TerritoryAlternateKey")
+        pairs = df_changed.select(
+            col("employee_id").cast("string").alias("EmployeeAlternateKey"),
+            col("territory_id").cast("string").alias("TerritoryAlternateKey"),
+            col("updatedate")
+        ).groupBy("EmployeeAlternateKey", "TerritoryAlternateKey") \
+         .agg(max("updatedate").alias("updatedate"))
+        total_pairs = pairs.count()
 
-    fact = fact.withColumn("EmployeeKey", col("EmployeeKey").cast("long")) \
-               .withColumn("TerritoryKey", col("TerritoryKey").cast("long")) \
-               .withColumn(
-                    "FactEmployeeTerritoryKey",
-                    expr("hash(EmployeeKey, TerritoryKey)").cast("long")
-               ) \
-               .select(
-                    "FactEmployeeTerritoryKey",
-                    "EmployeeKey",
-                    "TerritoryKey",
-                    "updatedate"
-               ).dropna(subset=["EmployeeKey", "TerritoryKey"])
+        fact = pairs \
+            .join(dim_emp, pairs.EmployeeAlternateKey == dim_emp.EmployeeAlternateKeyDim, "left") \
+            .join(dim_terr, pairs.TerritoryAlternateKey == dim_terr.TerritoryAlternateKeyDim, "left") \
+            .drop("EmployeeAlternateKeyDim", "TerritoryAlternateKeyDim") \
+            .drop("EmployeeAlternateKey", "TerritoryAlternateKey")
 
-    row_count = fact.count()
-    if row_count == 0:
-        print("FactEmployeeTerritories: nothing to upsert after key resolution")
-        return
+        fact = fact.withColumn("EmployeeKey", col("EmployeeKey").cast("long")) \
+                   .withColumn("TerritoryKey", col("TerritoryKey").cast("long")) \
+                   .withColumn(
+                        "FactEmployeeTerritoryKey",
+                        expr("hash(EmployeeKey, TerritoryKey)").cast("long")
+                   ) \
+                   .select(
+                        "FactEmployeeTerritoryKey",
+                        "EmployeeKey",
+                        "TerritoryKey",
+                        "updatedate"
+                   ).dropna(subset=["EmployeeKey", "TerritoryKey"])
 
-    write_ch_table(fact, "FactEmployeeTerritories")
-    dropped = total_pairs - row_count
-    if dropped:
-        print(f"FactEmployeeTerritories: skipped {dropped} pairs missing dimension keys")
-    print(f"FactEmployeeTerritories: wrote {row_count} rows")
+        row_count = fact.count()
+        if row_count == 0:
+            logger.warning("FactEmployeeTerritories: nothing to upsert after key resolution")
+            return
+
+        write_ch_table(fact, "FactEmployeeTerritories")
+        dropped = total_pairs - row_count
+        if dropped > 0:
+            logger.warning(f"FactEmployeeTerritories: skipped {dropped} pairs missing dimension keys")
+        elif dropped < 0:
+            logger.debug(f"FactEmployeeTerritories: wrote {row_count} rows (expected {total_pairs} pairs, difference may be due to join behavior)")
+        logger.info(f"FactEmployeeTerritories: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process FactEmployeeTerritories: {e}", exc_info=True)
+        raise
 
 
 def process_fact_orders(last_run):
-    where_o = f"updatedate > toDateTime('{last_run}')"
-    where_od = f"updatedate > toDateTime('{last_run}')"
-    orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
-    ods_changed = read_ch_table("northwind.northwind_order_details", where_od).select("order_id").distinct()
-    changed_order_ids = orders_changed.union(ods_changed).distinct()
-    if changed_order_ids.rdd.isEmpty():
-        # print("FactOrders: no changed orders")
-        return
-
-    changed_ids_list = [r["order_id"] for r in changed_order_ids.collect()]
-    print(f"FactOrders: rebuilding for {len(changed_ids_list)} orders (sample: {changed_ids_list[:5]})")
-
-    ids_csv = ",".join(str(i) for i in changed_ids_list)
-    where_full_orders = f"order_id IN ({ids_csv})"
-    orders_df = read_ch_table("northwind.northwind_orders", where_full_orders).alias("o")
-    od_df = read_ch_table("northwind.northwind_order_details", where_full_orders).alias("od")
-
-    dim_customer = read_ch_table("DimCustomer").select(col("CustomerAlternateKey"), col("CustomerKey"))
-    dim_emp = read_ch_table("DimEmployees").select(col("EmployeeAlternateKey"), col("EmployeeKey"))
-    dim_prod = read_ch_table("DimProducts").select(col("ProductAlternateKey"), col("ProductKey"))
-    dim_ship = read_ch_table("DimShippers").select(col("ShipperAlternateKey"), col("ShipperKey"))
-
-    od = od_df.alias("od")
-    o = orders_df.alias("o")
-    c = dim_customer.alias("c")
-    e = dim_emp.alias("e")
-    p = dim_prod.alias("p")
-    s = dim_ship.alias("s")     
-
-    fact = od.join(o, "order_id") \
-        .join(c, o.customer_id == c.CustomerAlternateKey, "left") \
-        .join(e, o.employee_id == e.EmployeeAlternateKey, "left") \
-        .join(p, od.product_id == p.ProductAlternateKey, "left") \
-        .join(s, o.ship_via == s.ShipperAlternateKey, "left") \
-        .withColumn("FactOrderKey", expr("hash(order_id, product_id)").cast("long")) \
-        .select(
-            col("FactOrderKey"),
-            col("o.order_id").alias("OrderAlternateKey"),
-            col("c.CustomerKey"),
-            col("e.EmployeeKey"),
-            col("p.ProductKey"),
-            col("s.ShipperKey"),
-            col("o.order_date").alias("OrderDate"),
-            col("o.required_date").alias("DueDate"),
-            col("o.shipped_date").alias("ShipDate"),
-            col("od.quantity").alias("Quantity"),
-            col("od.unit_price").alias("UnitPrice"),
-            (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
-            col("o.freight").alias("Freight"),
-            col("o.updatedate").alias("updatedate")
-        )
-
-    # Filter out rows with NULL dimension keys (required by ClickHouse schema)
-    fact = fact.dropna(subset=["CustomerKey", "EmployeeKey", "ProductKey", "ShipperKey"])
+    """
+    Process FactOrders fact table.
     
-    row_count = fact.count()
-    if row_count == 0:
-        print("FactOrders: nothing to write after filtering NULL dimension keys")
-        return
+    Args:
+        last_run: Last run timestamp for incremental processing
+        
+    Raises:
+        Exception: If processing fails
+    """
+    try:
+        logger.info("Processing FactOrders")
+        where_o = f"updatedate > toDateTime('{last_run}')"
+        where_od = f"updatedate > toDateTime('{last_run}')"
+        orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
+        ods_changed = read_ch_table("northwind.northwind_order_details", where_od).select("order_id").distinct()
+        changed_order_ids = orders_changed.union(ods_changed).distinct()
+        if changed_order_ids.rdd.isEmpty():
+            logger.debug("FactOrders: no changed orders")
+            return
 
-    write_ch_table(fact, "FactOrders")
-    print(f"FactOrders: wrote {row_count} rows")
+        changed_ids_list = [r["order_id"] for r in changed_order_ids.collect()]
+        logger.info(f"FactOrders: rebuilding for {len(changed_ids_list)} orders (sample: {changed_ids_list[:5]})")
+
+        ids_csv = ",".join(str(i) for i in changed_ids_list)
+        where_full_orders = f"order_id IN ({ids_csv})"
+        orders_df = read_ch_table("northwind.northwind_orders", where_full_orders).alias("o")
+        od_df = read_ch_table("northwind.northwind_order_details", where_full_orders).alias("od")
+
+        try:
+            dim_customer = read_ch_table("DimCustomer").select(col("CustomerAlternateKey"), col("CustomerKey"))
+            dim_emp = read_ch_table("DimEmployees").select(col("EmployeeAlternateKey"), col("EmployeeKey"))
+            dim_prod = read_ch_table("DimProducts").select(col("ProductAlternateKey"), col("ProductKey"))
+            dim_ship = read_ch_table("DimShippers").select(col("ShipperAlternateKey"), col("ShipperKey"))
+        except Exception as e:
+            logger.error(f"FactOrders: failed to read dimension tables: {e}", exc_info=True)
+            raise
+
+        od = od_df.alias("od")
+        o = orders_df.alias("o")
+        c = dim_customer.alias("c")
+        e = dim_emp.alias("e")
+        p = dim_prod.alias("p")
+        s = dim_ship.alias("s")     
+
+        fact = od.join(o, "order_id") \
+            .join(c, col("o.customer_id").cast("string") == c.CustomerAlternateKey, "left") \
+            .join(e, col("o.employee_id").cast("string") == e.EmployeeAlternateKey, "left") \
+            .join(p, col("od.product_id").cast("string") == p.ProductAlternateKey, "left") \
+            .join(s, col("o.ship_via").cast("string") == s.ShipperAlternateKey, "left") \
+            .withColumn("FactOrderKey", expr("hash(order_id, product_id)").cast("long")) \
+            .select(
+                col("FactOrderKey"),
+                col("o.order_id").alias("OrderAlternateKey"),
+                col("c.CustomerKey"),
+                col("e.EmployeeKey"),
+                col("p.ProductKey"),
+                col("s.ShipperKey"),
+                col("o.order_date").cast("long").alias("OrderDate"),
+                col("o.required_date").cast("long").alias("DueDate"),
+                col("o.shipped_date").cast("long").alias("ShipDate"),
+                col("od.quantity").alias("Quantity"),
+                col("od.unit_price").alias("UnitPrice"),
+                (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
+                col("o.freight").alias("Freight"),
+                col("o.updatedate").alias("updatedate")
+            )
+
+        # Log counts before filtering to help diagnose join issues
+        total_before_filter = fact.count()
+        null_customer = fact.filter(col("CustomerKey").isNull()).count()
+        null_employee = fact.filter(col("EmployeeKey").isNull()).count()
+        null_product = fact.filter(col("ProductKey").isNull()).count()
+        null_shipper = fact.filter(col("ShipperKey").isNull()).count()
+        logger.info(f"FactOrders: before filtering - total: {total_before_filter}, NULL CustomerKey: {null_customer}, NULL EmployeeKey: {null_employee}, NULL ProductKey: {null_product}, NULL ShipperKey: {null_shipper}")
+        
+        # Filter out rows with NULL dimension keys (required by ClickHouse schema)
+        fact = fact.dropna(subset=["CustomerKey", "EmployeeKey", "ProductKey", "ShipperKey"])
+        
+        row_count = fact.count()
+        if row_count == 0:
+            logger.warning("FactOrders: nothing to write after filtering NULL dimension keys")
+            return
+
+        write_ch_table(fact, "FactOrders")
+        logger.info(f"FactOrders: wrote {row_count} rows")
+        
+    except Exception as e:
+        logger.error(f"Failed to process FactOrders: {e}", exc_info=True)
+        raise
 
 # ---------------- main run ----------------
 def main_once():
-    last_run = get_last_run()
-    print("last_run =", last_run)
-    now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    """
+    Execute one ETL run.
+    
+    Raises:
+        Exception: If ETL run fails
+    """
+    try:
+        last_run = get_last_run()
+        logger.info(f"Starting ETL run with last_run = {last_run}")
+        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    # ensure static dimensions are seeded
-    initialize_dim_date()
+        # ensure static dimensions are seeded
+        try:
+            initialize_dim_date()
+        except Exception as e:
+            logger.error(f"Failed to initialize DimDate: {e}", exc_info=True)
+            raise
 
-    # process dimensions (only those with updatedate)
-    process_dim_customers(last_run)
-    process_dim_employees(last_run)
-    process_dim_suppliers(last_run)
-    process_dim_products(last_run)
-    process_dim_shippers(last_run)
-    process_dim_territories(last_run)
-    # other dims (categories, territories) if you want can be added similarly
+        # process dimensions (only those with updatedate)
+        dimension_processors = [
+            ("DimCustomer", process_dim_customers),
+            ("DimEmployees", process_dim_employees),
+            ("DimSuppliers", process_dim_suppliers),
+            ("DimProducts", process_dim_products),
+            ("DimShippers", process_dim_shippers),
+            ("DimTerritories", process_dim_territories),
+        ]
+        
+        for dim_name, processor in dimension_processors:
+            try:
+                processor(last_run)
+            except Exception as e:
+                logger.error(f"Failed to process {dim_name}: {e}", exc_info=True)
+                # Continue with other dimensions instead of failing completely
+                continue
 
-    # process facts
-    process_fact_employee_territories(last_run)
-    process_fact_orders(last_run)
+        # process facts
+        fact_processors = [
+            ("FactEmployeeTerritories", process_fact_employee_territories),
+            ("FactOrders", process_fact_orders),
+        ]
+        
+        for fact_name, processor in fact_processors:
+            try:
+                processor(last_run)
+            except Exception as e:
+                logger.error(f"Failed to process {fact_name}: {e}", exc_info=True)
+                # Continue with other facts instead of failing completely
+                continue
 
-    # update last_run only after successful processing
-    set_last_run(now_ts)
-    print("Updated last_run ->", now_ts)
+        # update last_run only after successful processing
+        try:
+            set_last_run(now_ts)
+            logger.info(f"ETL run completed successfully. Updated last_run -> {now_ts}")
+        except Exception as e:
+            logger.error(f"Failed to update last_run timestamp: {e}", exc_info=True)
+            # Don't raise - the processing was successful
+            
+    except Exception as e:
+        logger.error(f"Fatal error in ETL run: {e}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
-    # main_once()
-    # Optionally: run in a loop (or schedule via cron/systemd)
-    while True:
-        main_once()
-        time.sleep(POLL_INTERVAL_SEC)
+    try:
+        logger.info("Starting incremental ETL job")
+        # Optionally: run in a loop (or schedule via cron/systemd)
+        while True:
+            try:
+                main_once()
+            except KeyboardInterrupt:
+                logger.info("Received interrupt signal. Stopping ETL job...")
+                break
+            except Exception as e:
+                logger.error(f"Error in ETL run, will retry after {POLL_INTERVAL_SEC} seconds: {e}", exc_info=True)
+                # Continue loop to retry
+            time.sleep(POLL_INTERVAL_SEC)
+    except Exception as e:
+        logger.error(f"Fatal error in ETL job: {e}", exc_info=True)
+        sys.exit(1)

@@ -1,0 +1,466 @@
+version: '3.9'
+
+services:
+  # ============================================
+  # PostgreSQL - Source OLTP Database
+  # ============================================
+  postgres:
+    container_name: postgres
+    image: sobhanebrahimi/postgres18-northwind-db:0.1
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-northwind}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-15432}:${POSTGRES_INTERNAL_PORT:-5432}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/
+      - ./1-postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-northwind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Zookeeper - Coordination Service
+  # ============================================
+  zookeeper:
+    image: sobhanebrahimi/zookeper:0.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_CLIENT_PORT:-2181}
+      ZOOKEEPER_TICK_TIME: ${ZOOKEEPER_TICK_TIME:-2000}
+    ports:
+      - "${ZOOKEEPER_HOST_PORT:-12181}:${ZOOKEEPER_CLIENT_PORT:-2181}"
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep -q 'Zookeeper version' || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Kafka - Message Broker
+  # ============================================
+  kafka:
+    image: sobhanebrahimi/kafka:0.1
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "${KAFKA_PORT:-39092}:${KAFKA_INTERNAL_PORT:-9092}"
+      - "${KAFKA_ADVERTISED_PORT:-29092}:${KAFKA_ADVERTISED_PORT:-29092}"
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID:-1}
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_CLIENT_PORT:-2181}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:${KAFKA_INTERNAL_PORT:-9092},PLAINTEXT_HOST://0.0.0.0:${KAFKA_ADVERTISED_PORT:-29092}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:${KAFKA_INTERNAL_PORT:-9092},PLAINTEXT_HOST://localhost:${KAFKA_ADVERTISED_PORT:-29092}
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR:-1}
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: ${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR:-1}
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: ${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR:-1}
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Debezium Connect - CDC Connector
+  # ============================================
+  debezium-connect:
+    image: sobhanebrahimi/debezium:0.1
+    container_name: debezium-connect
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: ${BOOTSTRAP_SERVERS:-kafka:9092}
+      GROUP_ID: ${GROUP_ID:-connect-cluster}
+      CONFIG_STORAGE_TOPIC: ${CONFIG_STORAGE_TOPIC:-connect-configs}
+      OFFSET_STORAGE_TOPIC: ${OFFSET_STORAGE_TOPIC:-connect-offsets}
+      STATUS_STORAGE_TOPIC: ${STATUS_STORAGE_TOPIC:-connect-status}
+      KEY_CONVERTER: ${KEY_CONVERTER:-org.apache.kafka.connect.json.JsonConverter}
+      VALUE_CONVERTER: ${VALUE_CONVERTER:-org.apache.kafka.connect.json.JsonConverter}
+      ENABLE_DEBEZIUM_SCRIPTING: ${ENABLE_DEBEZIUM_SCRIPTING:-true}
+    ports:
+      - "8083:8083"
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/connectors || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Debezium Connector Registration
+  # ============================================
+  register-connector:
+    image: curlimages/curl:8.6.0
+    depends_on:
+      debezium-connect:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      echo 'Waiting for Debezium Connect to be ready...' &&
+      sleep 15 &&
+      echo 'Registering PostgreSQL connector...' &&
+      curl -X POST http://debezium-connect:8083/connectors
+      -H 'Content-Type: application/json'
+      -d '{
+        \"name\": \"${CONNECTOR_NAME:-postgres-northwind-connector}\",
+        \"config\": {
+          \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",
+          \"tasks.max\": \"1\",
+          \"database.hostname\": \"${POSTGRES_HOST:-postgres}\",
+          \"database.port\": \"${POSTGRES_PORT:-5432}\",
+          \"database.user\": \"${POSTGRES_USER:-postgres}\",
+          \"database.password\": \"${POSTGRES_PASSWORD:-postgres}\",
+          \"database.dbname\": \"${POSTGRES_DB:-northwind}\",
+          \"topic.prefix\": \"${TOPIC_PREFIX:-northwind}\",
+          \"plugin.name\": \"${PLUGIN_NAME:-pgoutput}\",
+          \"slot.name\": \"${SLOT_NAME:-debezium}\",
+          \"publication.autocreate.mode\": \"filtered\",
+          \"include.schema.changes\": \"true\",
+          \"snapshot.mode\": \"initial\",
+          \"decimal.handling.mode\": \"precise\",
+          \"time.precision.mode\": \"connect\",
+          \"tombstones.on.delete\": \"false\",
+          \"delete.handling.mode\": \"rewrite\",
+          \"transforms\": \"unwrap\",
+          \"transforms.unwrap.type\": \"io.debezium.transforms.ExtractNewRecordState\",
+          \"transforms.unwrap.drop.tombstones\": \"false\",
+          \"transforms.unwrap.delete.handling.mode\": \"rewrite\",
+          \"transforms.unwrap.add.fields\": \"op,ts_ms\"
+        }
+      }' &&
+      echo 'Connector registered successfully!'
+      "
+    networks:
+      - ProjectHost
+    restart: "no"
+
+  # ============================================
+  # ClickHouse Zookeeper - For ClickHouse Replication
+  # ============================================
+  clickhouse-zookeeper:
+    image: sobhanebrahimi/zookeper:0.1
+    container_name: clickhouse-zookeeper
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: ${ALLOW_ANONYMOUS_LOGIN:-yes}
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_CLIENT_PORT_CH:-2181}
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep -q 'Zookeeper version' || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # ClickHouse Replica 1
+  # ============================================
+  clickhouse1:
+    image: sobhanebrahimi/clickhouse:0.1
+    container_name: clickhouse1
+    user: root
+    depends_on:
+      clickhouse-zookeeper:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-123456}
+    ports:
+      - "${CLICKHOUSE1_NATIVE_PORT:-19000}:9000"
+      - "${CLICKHOUSE1_HTTP_PORT:-18123}:8123"
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - ProjectHost
+    volumes:
+      - clickhouse1_data:/var/lib/clickhouse
+      - type: bind
+        source: ./5-clickhouse/config_replica1.xml
+        target: /etc/clickhouse-server/config.xml
+      - ./5-clickhouse/init-db/init.sql:/tmp/init-db/init.sql
+    entrypoint: >
+      bash -c "
+        /entrypoint.sh &
+        sleep 15
+        clickhouse-client --multiquery < /tmp/init-db/init.sql
+        wait
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # ClickHouse Replica 2
+  # ============================================
+  clickhouse2:
+    image: sobhanebrahimi/clickhouse:0.1
+    container_name: clickhouse2
+    user: root
+    depends_on:
+      clickhouse-zookeeper:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-123456}
+    ports:
+      - "${CLICKHOUSE2_NATIVE_PORT:-29000}:9000"
+      - "${CLICKHOUSE2_HTTP_PORT:-28123}:8123"
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - ProjectHost
+    volumes:
+      - clickhouse2_data:/var/lib/clickhouse
+      - type: bind
+        source: ./5-clickhouse/config_replica2.xml
+        target: /etc/clickhouse-server/config.xml
+      - ./5-clickhouse/init-db/init.sql:/tmp/init-db/init.sql
+    entrypoint: >
+      bash -c "
+        /entrypoint.sh &
+        sleep 15
+        clickhouse-client --multiquery < /tmp/init-db/init.sql
+        wait
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Spark Master
+  # ============================================
+  spark-master:
+    image: sobhanebrahimi/spark:0.1
+    container_name: spark-master
+    environment:
+      SPARK_MODE: ${SPARK_MODE_MASTER:-master}
+      SPARK_RPC_AUTHENTICATION_ENABLED: ${SPARK_RPC_AUTHENTICATION_ENABLED:-no}
+      SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED:-no}
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: ${SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED:-no}
+      SPARK_SSL_ENABLED: ${SPARK_SSL_ENABLED:-no}
+      HOME: /tmp
+    ports:
+      - "8085:8080"
+      - "7077:7077"
+    volumes:
+      - ./6-spark/scripts:/opt/bitnami/spark/scripts
+      - ./6-spark/conf:/opt/bitnami/spark/conf
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Spark Worker 1
+  # ============================================
+  spark-worker1:
+    image: sobhanebrahimi/spark:0.1
+    container_name: spark-worker1
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      SPARK_MODE: ${SPARK_MODE_WORKER:-worker}
+      SPARK_MASTER_URL: spark://spark-master:${SPARK_MASTER_PORT:-7077}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_RPC_AUTHENTICATION_ENABLED: ${SPARK_RPC_AUTHENTICATION_ENABLED:-no}
+      SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED:-no}
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: ${SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED:-no}
+      SPARK_SSL_ENABLED: ${SPARK_SSL_ENABLED:-no}
+      HOME: /tmp
+    volumes:
+      - ./6-spark/scripts:/opt/bitnami/spark/scripts
+      - ./6-spark/conf:/opt/bitnami/spark/conf
+    networks:
+      - ProjectHost
+    restart: unless-stopped
+
+  # ============================================
+  # Spark Worker 2
+  # ============================================
+  spark-worker2:
+    image: sobhanebrahimi/spark:0.1
+    container_name: spark-worker2
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      SPARK_MODE: ${SPARK_MODE_WORKER:-worker}
+      SPARK_MASTER_URL: spark://spark-master:${SPARK_MASTER_PORT:-7077}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_RPC_AUTHENTICATION_ENABLED: ${SPARK_RPC_AUTHENTICATION_ENABLED:-no}
+      SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED:-no}
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: ${SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED:-no}
+      SPARK_SSL_ENABLED: ${SPARK_SSL_ENABLED:-no}
+      HOME: /tmp
+    volumes:
+      - ./6-spark/scripts:/opt/bitnami/spark/scripts
+      - ./6-spark/conf:/opt/bitnami/spark/conf
+    networks:
+      - ProjectHost
+    restart: unless-stopped
+
+  # ============================================
+  # Spark CDC Streaming Job
+  # ============================================
+  pyspark-job-cdc:
+    image: sobhanebrahimi/spark:0.1
+    container_name: pyspark-job-cdc
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      spark-worker1:
+        condition: service_started
+      spark-worker2:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      clickhouse1:
+        condition: service_healthy
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./6-spark/scripts:/opt/bitnami/spark/scripts
+      - ./6-spark/conf:/opt/bitnami/spark/conf
+    command:
+      [
+        "/opt/bitnami/spark/bin/spark-submit",
+        "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
+        "--driver-memory", "1g",
+        "--executor-memory", "1g",
+        "--conf", "spark.executor.instances=1",
+        "--conf", "spark.executor.cores=2",
+        "--conf", "spark.cores.max=4",
+        "--conf", "spark.sql.shuffle.partitions=10",
+        "/opt/bitnami/spark/scripts/northwind-ch-stg.py"
+      ]
+    networks:
+      - ProjectHost
+    restart: unless-stopped
+
+  # ============================================
+  # Spark DW ETL Job
+  # ============================================
+  pyspark-job-dw:
+    image: sobhanebrahimi/spark:0.1
+    container_name: pyspark-job-dw
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      spark-worker1:
+        condition: service_started
+      spark-worker2:
+        condition: service_started
+      clickhouse1:
+        condition: service_healthy
+      pyspark-job-cdc:
+        condition: service_started
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./6-spark/scripts:/opt/bitnami/spark/scripts
+      - ./6-spark/conf:/opt/bitnami/spark/conf
+    command:
+      [
+        "/opt/bitnami/spark/bin/spark-submit",
+        "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
+        "--driver-memory", "1g",
+        "--executor-memory", "1g",
+        "--conf", "spark.executor.instances=1",
+        "--conf", "spark.executor.cores=2",
+        "--conf", "spark.cores.max=4",
+        "--conf", "spark.sql.shuffle.partitions=10",
+        "/opt/bitnami/spark/scripts/northwind-dw.py"
+      ]
+    networks:
+      - ProjectHost
+    restart: unless-stopped
+
+  # ============================================
+  # Grafana - Visualization and Monitoring
+  # ============================================
+  grafana:
+    image: sobhanebrahimi/grafana:0.1
+    container_name: grafana
+    depends_on:
+      clickhouse1:
+        condition: service_healthy
+    ports:
+      - "${GRAFANA_PORT:-12345}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_PATHS_PROVISIONING: ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./7-grafana/provisioning:/etc/grafana/provisioning
+      - ./7-grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - ProjectHost
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  ProjectHost:
+    driver: bridge
+    name: ProjectHost
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  clickhouse1_data:
+    driver: local
+  clickhouse2_data:
+    driver: local
+  grafana_data:
+    driver: local
+
