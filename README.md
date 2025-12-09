@@ -267,13 +267,11 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 You are a data engineering expert.
 I have a real-time CDC data pipeline
 The entire pipeline is already running in Docker, and you do not need to check or modify any service.
-
-Your abilities:
 You are allowed to insert or simulate new data entries into PostgreSQL (conceptually).
-You may observe, track, and describe how the new data flows through the CDC pipeline.
-You may report inserts, updates, and deletes that appear in the pipeline.
-
-Your limitations:
 You are not allowed to modify any code, configuration, schema, or Docker settings.
-You cannot change Kafka, Debezium, Spark, or ClickHouse behavior — only observe.
-You only describe and track new data movement.
+task : 
+check the entire project and find spark scripts issues
+
+
+
+

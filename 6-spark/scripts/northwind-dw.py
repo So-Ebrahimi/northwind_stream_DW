@@ -7,6 +7,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import TimestampType
 import time 
+from pyspark.sql.window import Window
 
 # Configure logging
 logging.basicConfig(
@@ -129,6 +130,70 @@ def table_has_rows(table_name):
     except Exception as exc:
         logger.warning(f"Could not query {table_name} to check for rows: {exc}")
         return False
+
+
+def get_max_key(table_name, key_column):
+    """
+    Retrieve the current maximum surrogate key from a ClickHouse table.
+    Returns 0 if the table is empty or cannot be queried.
+    """
+    try:
+        df = spark.read.format("jdbc") \
+            .option("driver", CLICKHOUSE_DRIVER) \
+            .option("url", CLICKHOUSE_URL) \
+            .option("user", CLICKHOUSE_USER) \
+            .option("password", CLICKHOUSE_PASS) \
+            .option("dbtable", f"(SELECT max({key_column}) AS max_key FROM {table_name}) t") \
+            .load()
+        row = df.first()
+        if row and row["max_key"] is not None:
+            return int(row["max_key"])
+    except Exception as exc:
+        logger.warning(f"Could not read max({key_column}) from {table_name}: {exc}")
+    return 0
+
+
+def assign_incremental_keys(df, key_column, natural_key_cols, target_table, existing_df=None):
+    """
+    Assign incremental surrogate keys based on existing keys in the target table.
+    - Reuses existing keys when natural keys already exist.
+    - Generates new keys starting after the current max key.
+    """
+    try:
+        # Pull existing mappings if none provided
+        if existing_df is None:
+            try:
+                existing_df = read_ch_table(target_table).select(
+                    col(key_column), *[col(c) for c in natural_key_cols]
+                )
+                if existing_df.rdd.isEmpty():
+                    existing_df = None
+            except Exception as exc:
+                logger.debug(f"{target_table}: could not load existing keys: {exc}")
+                existing_df = None
+
+        if existing_df is not None:
+            df = df.join(existing_df, on=natural_key_cols, how="left")
+        else:
+            df = df.withColumn(key_column, lit(None).cast("long"))
+
+        # New rows without a surrogate key
+        new_rows = df.filter(col(key_column).isNull())
+        if not new_rows.rdd.isEmpty():
+            offset = get_max_key(target_table, key_column)
+            window = Window.orderBy(*[col(c) for c in natural_key_cols])
+            new_rows = new_rows.withColumn(
+                key_column,
+                (row_number().over(window) + lit(offset)).cast("long")
+            )
+            existing_rows = df.filter(col(key_column).isNotNull())
+            df = existing_rows.unionByName(new_rows, allowMissingColumns=True)
+
+        df = df.withColumn(key_column, col(key_column).cast("long"))
+        return df
+    except Exception as exc:
+        logger.error(f"Failed to assign incremental keys for {target_table}: {exc}", exc_info=True)
+        raise
 
 def initialize_dim_date():
     """
@@ -262,15 +327,18 @@ def process_dim_customers(last_run):
                                .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
                                .withColumn("address", coalesce("address", lit("Unknown")))
         geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
-        geo_out = geo.withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+        geo_out = assign_incremental_keys(
+            geo,
+            "GeographyKey",
+            ["country","region","city","postal_code","address"],
+            "DimGeography"
+        )
         write_ch_table(geo_out.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
         dim_geo = geo_out.select("GeographyKey","country","region","city","postal_code","address")
-        dim_customer = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
-            .withColumn("CustomerKey", expr("hash(customer_id)")) \
+        dim_customer_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumnRenamed("customer_id","CustomerAlternateKey") \
             .select(
-                col("CustomerKey").cast("long"),
                 col("CustomerAlternateKey"),
                 col("GeographyKey").cast("long"),
                 col("company_name").alias("CompanyName"),
@@ -280,6 +348,22 @@ def process_dim_customers(last_run):
                 col("fax"),
                 col("updatedate").alias("updatedate")
             )
+        dim_customer = assign_incremental_keys(
+            dim_customer_base,
+            "CustomerKey",
+            ["CustomerAlternateKey"],
+            "DimCustomer"
+        ).select(
+            "CustomerKey",
+            "CustomerAlternateKey",
+            "GeographyKey",
+            "CompanyName",
+            "ContactName",
+            "ContactTitle",
+            "phone",
+            "fax",
+            "updatedate"
+        )
         write_ch_table(dim_customer, "DimCustomer")
         row_count = dim_customer.count()
         logger.info(f"DimCustomer: wrote {row_count} rows")
@@ -312,16 +396,21 @@ def process_dim_employees(last_run):
                                .withColumn("city", coalesce("city", lit("Unknown"))) \
                                .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
                                .withColumn("address", coalesce("address", lit("Unknown")))
-        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
-                            .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
+        dim_geo = assign_incremental_keys(
+            dim_geo,
+            "GeographyKey",
+            ["country","region","city","postal_code","address"],
+            "DimGeography"
+        )
         write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
-        dim_emp = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
-            .withColumn("EmployeeKey", expr("hash(employee_id)")) \
+        dim_emp_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("EmployeeAlternateKey", col("employee_id").cast("string")) \
             .withColumnRenamed("reports_to","ParentEmployeeKey") \
+            .withColumn("birth_date", when(col("birth_date").isNotNull() & (col("birth_date") != ""), col("birth_date").cast("long")).otherwise(lit(None).cast("long"))) \
+            .withColumn("hire_date", when(col("hire_date").isNotNull() & (col("hire_date") != ""), col("hire_date").cast("long")).otherwise(lit(None).cast("long"))) \
             .select(
-                col("EmployeeKey").cast("long"),
                 col("EmployeeAlternateKey"),
                 col("ParentEmployeeKey"),
                 col("GeographyKey").cast("long"),
@@ -338,6 +427,29 @@ def process_dim_employees(last_run):
                 col("photo_path"),
                 col("updatedate").alias("updatedate")
             )
+        dim_emp = assign_incremental_keys(
+            dim_emp_base,
+            "EmployeeKey",
+            ["EmployeeAlternateKey"],
+            "DimEmployees"
+        ).select(
+            "EmployeeKey",
+            "EmployeeAlternateKey",
+            "ParentEmployeeKey",
+            "GeographyKey",
+            "FirstName",
+            "LastName",
+            "title",
+            "title_of_courtesy",
+            "birth_date",
+            "hire_date",
+            "home_phone",
+            "extension",
+            "photo",
+            "notes",
+            "photo_path",
+            "updatedate"
+        )
         write_ch_table(dim_emp, "DimEmployees")
         row_count = dim_emp.count()
         logger.info(f"DimEmployees: wrote {row_count} rows")
@@ -370,15 +482,18 @@ def process_dim_suppliers(last_run):
                                .withColumn("city", coalesce("city", lit("Unknown"))) \
                                .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
                                .withColumn("address", coalesce("address", lit("Unknown")))
-        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates() \
-                            .withColumn("GeographyKey", expr("hash(country,region,city,postal_code,address)"))
+        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
+        dim_geo = assign_incremental_keys(
+            dim_geo,
+            "GeographyKey",
+            ["country","region","city","postal_code","address"],
+            "DimGeography"
+        )
         write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
 
-        dim_sup = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
-            .withColumn("SupplierKey", expr("hash(supplier_id)")) \
+        dim_sup_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("SupplierAlternateKey", col("supplier_id").cast("string")) \
             .select(
-                col("SupplierKey").cast("long"),
                 col("SupplierAlternateKey"),
                 col("GeographyKey").cast("long"),
                 col("company_name"),
@@ -389,6 +504,23 @@ def process_dim_suppliers(last_run):
                 col("homepage"),
                 col("updatedate").alias("updatedate")
             )
+        dim_sup = assign_incremental_keys(
+            dim_sup_base,
+            "SupplierKey",
+            ["SupplierAlternateKey"],
+            "DimSuppliers"
+        ).select(
+            "SupplierKey",
+            "SupplierAlternateKey",
+            "GeographyKey",
+            "company_name",
+            "contact_name",
+            "contact_title",
+            "phone",
+            "fax",
+            "homepage",
+            "updatedate"
+        )
         write_ch_table(dim_sup, "DimSuppliers")
         row_count = dim_sup.count()
         logger.info(f"DimSuppliers: wrote {row_count} rows")
@@ -409,8 +541,8 @@ def process_dim_products(last_run):
     """
     try:
         logger.info("Processing DimProducts")
-        where = f"p.updatedate > toDateTime('{last_run}') and operation != 'd'"
-        df_changed = read_ch_table("northwind.northwind_products p", where)
+        where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
+        df_changed = read_ch_table("northwind.northwind_products", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimProducts: no changes")
             return
@@ -421,18 +553,16 @@ def process_dim_products(last_run):
             col("SupplierAlternateKey")
         )
 
-        dim_products = df_changed.alias("prod") \
+        dim_products_base = df_changed.alias("prod") \
             .join(categories.alias("cat"), "category_id", "left") \
             .join(
                 dim_suppliers.alias("sup"),
                 col("prod.supplier_id").cast("string") == col("sup.SupplierAlternateKey"),
                 "left"
             ) \
-            .withColumn("ProductKey", expr("hash(prod.product_id)")) \
             .withColumn("ProductAlternateKey", col("prod.product_id").cast("string")) \
             .withColumnRenamed("product_name","ProductName") \
             .select(
-                col("ProductKey").cast("long"),
                 col("ProductAlternateKey"),
                 col("sup.SupplierKey").alias("SupplierKey"),
                 col("ProductName"),
@@ -445,6 +575,25 @@ def process_dim_products(last_run):
                 "discontinued",
                 col("updatedate").alias("updatedate")
             )
+        dim_products = assign_incremental_keys(
+            dim_products_base,
+            "ProductKey",
+            ["ProductAlternateKey"],
+            "DimProducts"
+        ).select(
+            "ProductKey",
+            "ProductAlternateKey",
+            "SupplierKey",
+            "ProductName",
+            "CategoryName",
+            "quantity_per_unit",
+            "unit_price",
+            "units_in_stock",
+            "units_on_order",
+            "reorder_level",
+            "discontinued",
+            "updatedate"
+        )
         write_ch_table(dim_products, "DimProducts")
         row_count = dim_products.count()
         logger.info(f"DimProducts: wrote {row_count} rows")
@@ -471,15 +620,25 @@ def process_dim_shippers(last_run):
             logger.debug("DimShippers: no changes")
             return
         
-        dim_shippers = df_changed.withColumn("ShipperKey", expr("hash(shipper_id)")) \
-            .withColumn("ShipperAlternateKey", col("shipper_id").cast("string")) \
+        dim_shippers_base = df_changed.withColumn("ShipperAlternateKey", col("shipper_id").cast("string")) \
             .select(
-                col("ShipperKey").cast("long"),
                 col("ShipperAlternateKey"),
                 col("company_name"),
                 col("phone"),
                 col("updatedate").alias("updatedate")
             )
+        dim_shippers = assign_incremental_keys(
+            dim_shippers_base,
+            "ShipperKey",
+            ["ShipperAlternateKey"],
+            "DimShippers"
+        ).select(
+            "ShipperKey",
+            "ShipperAlternateKey",
+            "company_name",
+            "phone",
+            "updatedate"
+        )
         write_ch_table(dim_shippers, "DimShippers")
         row_count = dim_shippers.count()
         logger.info(f"DimShippers: wrote {row_count} rows")
@@ -510,9 +669,8 @@ def process_dim_territories(last_run):
             col("region_id"),
             trim(col("region_description")).alias("RegionDescription")
         )
-        dim_terr = df_changed.alias("terr") \
+        dim_terr_base = df_changed.alias("terr") \
             .join(regions.alias("reg"), "region_id", "left") \
-            .withColumn("TerritoryKey", expr("hash(terr.territory_id)")) \
             .withColumn("TerritoryAlternateKey", col("terr.territory_id").cast("string")) \
             .withColumn("TerritoryDescription", trim(col("terr.territory_description"))) \
             .withColumn("RegionDescription", col("reg.RegionDescription")) \
@@ -520,7 +678,6 @@ def process_dim_territories(last_run):
             .withColumn("EndDate", lit(None).cast(TimestampType())) \
             .withColumn("updatedate", col("terr.updatedate")) \
             .select(
-                col("TerritoryKey").cast("long"),
                 "TerritoryAlternateKey",
                 "RegionDescription",
                 "TerritoryDescription",
@@ -528,6 +685,20 @@ def process_dim_territories(last_run):
                 "EndDate",
                 "updatedate"
             )
+        dim_terr = assign_incremental_keys(
+            dim_terr_base,
+            "TerritoryKey",
+            ["TerritoryAlternateKey"],
+            "DimTerritories"
+        ).select(
+            "TerritoryKey",
+            "TerritoryAlternateKey",
+            "RegionDescription",
+            "TerritoryDescription",
+            "StartDate",
+            "EndDate",
+            "updatedate"
+        )
         write_ch_table(dim_terr, "DimTerritories")
         row_count = dim_terr.count()
         logger.info(f"DimTerritories: wrote {row_count} rows")
@@ -589,16 +760,35 @@ def process_fact_employee_territories(last_run):
 
         fact = fact.withColumn("EmployeeKey", col("EmployeeKey").cast("long")) \
                    .withColumn("TerritoryKey", col("TerritoryKey").cast("long")) \
-                   .withColumn(
-                        "FactEmployeeTerritoryKey",
-                        expr("hash(EmployeeKey, TerritoryKey)").cast("long")
-                   ) \
                    .select(
-                        "FactEmployeeTerritoryKey",
                         "EmployeeKey",
                         "TerritoryKey",
                         "updatedate"
                    ).dropna(subset=["EmployeeKey", "TerritoryKey"])
+
+        existing_pairs = None
+        try:
+            emp_keys = [str(r["EmployeeKey"]) for r in fact.select("EmployeeKey").distinct().collect()]
+            terr_keys = [str(r["TerritoryKey"]) for r in fact.select("TerritoryKey").distinct().collect()]
+            if emp_keys and terr_keys:
+                where_pairs = f"EmployeeKey IN ({','.join(emp_keys)}) AND TerritoryKey IN ({','.join(terr_keys)})"
+                existing_pairs = read_ch_table("FactEmployeeTerritories", where_pairs) \
+                    .select("FactEmployeeTerritoryKey", "EmployeeKey", "TerritoryKey")
+        except Exception as exc:
+            logger.debug(f"FactEmployeeTerritories: could not load existing pairs: {exc}")
+
+        fact = assign_incremental_keys(
+            fact,
+            "FactEmployeeTerritoryKey",
+            ["EmployeeKey", "TerritoryKey"],
+            "FactEmployeeTerritories",
+            existing_pairs
+        ).select(
+            "FactEmployeeTerritoryKey",
+            "EmployeeKey",
+            "TerritoryKey",
+            "updatedate"
+        )
 
         row_count = fact.count()
         if row_count == 0:
@@ -668,17 +858,18 @@ def process_fact_orders(last_run):
             .join(e, col("o.employee_id").cast("string") == e.EmployeeAlternateKey, "left") \
             .join(p, col("od.product_id").cast("string") == p.ProductAlternateKey, "left") \
             .join(s, col("o.ship_via").cast("string") == s.ShipperAlternateKey, "left") \
-            .withColumn("FactOrderKey", expr("hash(order_id, product_id)").cast("long")) \
+            .withColumn("OrderDate", when(col("o.order_date").isNotNull(), col("o.order_date").cast("long")).otherwise(lit(None).cast("long"))) \
+            .withColumn("DueDate", when(col("o.required_date").isNotNull(), col("o.required_date").cast("long")).otherwise(lit(None).cast("long"))) \
+            .withColumn("ShipDate", when(col("o.shipped_date").isNotNull(), col("o.shipped_date").cast("long")).otherwise(lit(None).cast("long"))) \
             .select(
-                col("FactOrderKey"),
                 col("o.order_id").alias("OrderAlternateKey"),
                 col("c.CustomerKey"),
                 col("e.EmployeeKey"),
                 col("p.ProductKey"),
                 col("s.ShipperKey"),
-                col("o.order_date").cast("long").alias("OrderDate"),
-                col("o.required_date").cast("long").alias("DueDate"),
-                col("o.shipped_date").cast("long").alias("ShipDate"),
+                col("OrderDate"),
+                col("DueDate"),
+                col("ShipDate"),
                 col("od.quantity").alias("Quantity"),
                 col("od.unit_price").alias("UnitPrice"),
                 (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
@@ -697,10 +888,45 @@ def process_fact_orders(last_run):
         # Filter out rows with NULL dimension keys (required by ClickHouse schema)
         fact = fact.dropna(subset=["CustomerKey", "EmployeeKey", "ProductKey", "ShipperKey"])
         
-        row_count = fact.count()
-        if row_count == 0:
+        if fact.rdd.isEmpty():
             logger.warning("FactOrders: nothing to write after filtering NULL dimension keys")
             return
+
+        existing_fact = None
+        try:
+            order_keys = [str(r["OrderAlternateKey"]) for r in fact.select("OrderAlternateKey").distinct().collect()]
+            product_keys = [str(r["ProductKey"]) for r in fact.select("ProductKey").distinct().collect()]
+            if order_keys and product_keys:
+                where_pairs = f"OrderAlternateKey IN ({','.join(order_keys)}) AND ProductKey IN ({','.join(product_keys)})"
+                existing_fact = read_ch_table("FactOrders", where_pairs) \
+                    .select("FactOrderKey", "OrderAlternateKey", "ProductKey")
+        except Exception as exc:
+            logger.debug(f"FactOrders: could not load existing keys: {exc}")
+
+        fact = assign_incremental_keys(
+            fact,
+            "FactOrderKey",
+            ["OrderAlternateKey", "ProductKey"],
+            "FactOrders",
+            existing_fact
+        ).select(
+            "FactOrderKey",
+            "OrderAlternateKey",
+            "CustomerKey",
+            "EmployeeKey",
+            "ProductKey",
+            "ShipperKey",
+            "OrderDate",
+            "DueDate",
+            "ShipDate",
+            "Quantity",
+            "UnitPrice",
+            "TotalAmount",
+            "Freight",
+            "updatedate"
+        )
+
+        row_count = fact.count()
 
         write_ch_table(fact, "FactOrders")
         logger.info(f"FactOrders: wrote {row_count} rows")

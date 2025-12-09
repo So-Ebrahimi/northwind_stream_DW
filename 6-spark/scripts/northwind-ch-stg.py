@@ -79,7 +79,6 @@ def readDataFromTopics(kafka_topic, schema):
     except Exception as e:
         logger.error(f"Failed to read from Kafka topic {kafka_topic}: {e}", exc_info=True)
         raise
-from pyspark.sql.functions import col, current_timestamp
 
 def transformDebeziumPayload(parsed_df):
     """
@@ -140,8 +139,11 @@ def transformDate(final_df, dateColumns):
                 continue
             final_df = (
                 final_df
-                .withColumn(dateColumn, expr(f"to_timestamp({dateColumn} * 86400)"))
-                .withColumn(dateColumn, date_format(dateColumn, "yyyyMMdd"))
+                .withColumn(dateColumn, 
+                    when(col(dateColumn).isNotNull(), 
+                        date_format(expr(f"to_timestamp({dateColumn} * 86400)"), "yyyyMMdd")
+                    ).otherwise(lit(None).cast("string"))
+                )
             )
         logger.debug("Successfully transformed date columns")
         return final_df

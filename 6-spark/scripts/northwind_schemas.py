@@ -233,15 +233,6 @@ us_states_schema = StructType([
     StructField("__ts_ms", LongType(), True)
 ])
 
-categories_schema = StructType([
-    StructField("category_id", IntegerType(), True),
-    StructField("category_name", StringType(), True),
-    StructField("description", StringType(), True),
-    StructField("picture", StringType(), True),
-    StructField("__deleted", StringType(), True),
-    StructField("__op", StringType(), True),
-    StructField("__ts_ms", LongType(), True)
-])
 table_mapping = {
     "categories": ["northwind.northwind_categories", "northwind.public.categories", categories_schema],
     "customers": ["northwind.northwind_customers", "northwind.public.customers", customers_schema],
