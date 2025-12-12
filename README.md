@@ -258,4 +258,16 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 
 
 #local run 
-/opt/bitnami/spark# /opt/bitnami/spark/bin/spark-submit    --master spark://spark-master:${SPARK_MASTER_PORT:-7077}    --driver-memory 1g   --executor-memory 1g   --conf spark.executor.instances=1   --conf spark.executor.cores=2   --conf spark.cores.max=4   --conf spark.sql.shuffle.partitions=10   /opt/bitnami/spark/scripts/northwind-dw.py
+/opt/bitnami/spark/bin/spark-submit    --master spark://spark-master:${SPARK_MASTER_PORT:-7077}    --driver-memory 1g   --executor-memory 1g   --conf spark.executor.instances=1   --conf spark.executor.cores=2   --conf spark.cores.max=4   --conf spark.sql.shuffle.partitions=10   /opt/bitnami/spark/scripts/northwind-dw.py
+
+
+TRUNCATE TABLE DimCustomer;
+TRUNCATE TABLE DimDate;
+TRUNCATE TABLE DimEmployees;
+TRUNCATE TABLE DimGeography;
+TRUNCATE TABLE DimProducts;
+TRUNCATE TABLE DimShippers;
+TRUNCATE TABLE DimSuppliers;
+TRUNCATE TABLE DimTerritories;
+TRUNCATE TABLE FactEmployeeTerritories;
+TRUNCATE TABLE FactOrders;

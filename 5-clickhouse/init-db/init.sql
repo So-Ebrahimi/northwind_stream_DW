@@ -10,10 +10,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_categories/{replica}',
-    '{replica}'
-)
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY category_id;
 
 -- CREATE TABLE IF NOT EXISTS northwind.northwind_customer_customer_demo
@@ -63,10 +60,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_customers/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY customer_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_employees
@@ -93,10 +87,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_employees/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY employee_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_employee_territories
@@ -107,10 +98,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_employee_territories/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY (employee_id, territory_id);
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_order_details
@@ -124,10 +112,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_order_details/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY (order_id, product_id);
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_orders
@@ -150,10 +135,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_orders/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY order_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_products
@@ -172,10 +154,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_products/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY product_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_region
@@ -186,10 +165,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_region/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY region_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_shippers
@@ -201,10 +177,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_shippers/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY shipper_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_suppliers
@@ -225,10 +198,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_suppliers/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY supplier_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_territories
@@ -240,10 +210,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_territories/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY territory_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_us_states
@@ -256,10 +223,7 @@ ON CLUSTER replicated_cluster
     operation CHAR(1),
     updatedate DateTime
 )
-ENGINE = ReplicatedMergeTree(
-    '/clickhouse/tables/northwind/northwind_us_states/{replica}',
-    '{replica}'
- )
+ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY state_id;
 
 
@@ -283,7 +247,8 @@ CREATE TABLE DimCustomer (
     ContactTitle String,
     phone String,
     fax Nullable(String),
-    updatedate DateTime
+    startdate DateTime,
+    enddate Nullable(DateTime)
 ) ENGINE = MergeTree()
 ORDER BY CustomerKey;
 
@@ -305,7 +270,8 @@ CREATE TABLE IF NOT EXISTS DimEmployees (
     photo String,
     notes String,
     photo_path String,
-    updatedate DateTime
+    startdate DateTime,
+    enddate Nullable(DateTime)
 ) ENGINE = MergeTree()
 ORDER BY EmployeeKey;
 
@@ -320,7 +286,8 @@ CREATE TABLE IF NOT EXISTS DimSuppliers (
     phone String,
     fax  Nullable(String),
     homepage Nullable(String),
-    updatedate DateTime
+    startdate DateTime,
+    enddate Nullable(DateTime)
 ) ENGINE = MergeTree()
 ORDER BY SupplierKey;
 
@@ -338,7 +305,8 @@ CREATE TABLE IF NOT EXISTS DimProducts (
     units_on_order Int32,
     reorder_level Int32,
     discontinued UInt8,
-    updatedate DateTime
+    startdate DateTime,
+    enddate Nullable(DateTime)
 ) ENGINE = MergeTree()
 ORDER BY ProductKey;
 
@@ -348,7 +316,8 @@ CREATE TABLE IF NOT EXISTS DimShippers (
     ShipperAlternateKey String,
     company_name String,
     phone String,
-    updatedate DateTime
+    startdate DateTime,
+    enddate Nullable(DateTime)
 ) ENGINE = MergeTree()
 ORDER BY ShipperKey;
 
@@ -358,9 +327,8 @@ CREATE TABLE IF NOT EXISTS DimTerritories (
     TerritoryAlternateKey String,
     RegionDescription String,
     TerritoryDescription String,
-    StartDate DateTime,
-    EndDate Nullable(DateTime),
-    updatedate DateTime
+    startdate DateTime,
+    enddate Nullable(DateTime)
 ) ENGINE = MergeTree()
 ORDER BY TerritoryKey;
 
@@ -380,9 +348,9 @@ CREATE TABLE IF NOT EXISTS FactOrders (
     UnitPrice Float32,
     TotalAmount Float32,
     Freight Float32,
-    updatedate DateTime
+    startdate DateTime,
 )
-ENGINE = ReplacingMergeTree(updatedate)
+ENGINE = ReplacingMergeTree(startdate)
 ORDER BY (OrderAlternateKey, ProductKey);
 
 
@@ -390,11 +358,10 @@ CREATE TABLE IF NOT EXISTS FactEmployeeTerritories (
     FactEmployeeTerritoryKey Int64,
     EmployeeKey Int64,
     TerritoryKey Int64,
-    updatedate DateTime
+    startdate DateTime,
 )
-ENGINE = ReplacingMergeTree(updatedate)
+ENGINE = ReplacingMergeTree(startdate)
 ORDER BY (EmployeeKey, TerritoryKey);
-
 
 CREATE TABLE IF NOT EXISTS DimDate
 (

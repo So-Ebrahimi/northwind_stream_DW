@@ -46,8 +46,12 @@ def read_ch_table(table, where_clause=None):
             .option("user", CLICKHOUSE_USER) \
             .option("password", CLICKHOUSE_PASS) \
             .option("dbtable", table)
+        final_W = "FINAL" if table[0:9] == "northwind" else ""
         if where_clause:
-            sql = f"(SELECT * FROM {table} WHERE {where_clause} ) as t"
+            sql = f"(SELECT * FROM {table}  {final_W} WHERE {where_clause} ) as t"
+            reader = reader.option("dbtable", sql)
+        else :
+            sql = f"(SELECT * FROM {table}  {final_W}) as t"
             reader = reader.option("dbtable", sql)
         df = reader.load()
         logger.debug(f"Successfully read table {table}")
@@ -279,7 +283,7 @@ def process_dim_customers(last_run):
                 col("contact_title").alias("ContactTitle"),
                 col("phone"),
                 col("fax"),
-                col("updatedate").alias("updatedate")
+                col("updatedate").alias("startdate")
             )
 
         dim_customer = assign_incremental_keys(
@@ -296,7 +300,7 @@ def process_dim_customers(last_run):
             "ContactTitle",
             "phone",
             "fax",
-            "updatedate"
+            "startdate"
         )
         write_ch_table(dim_customer, "DimCustomer")
         row_count = dim_customer.count()
@@ -335,7 +339,7 @@ def process_dim_employees(last_run):
                 col("photo"),
                 col("notes"),
                 col("photo_path"),
-                col("updatedate").alias("updatedate")
+                col("updatedate").alias("startdate")
             )
         dim_emp = assign_incremental_keys(
             dim_emp_base,
@@ -358,7 +362,7 @@ def process_dim_employees(last_run):
             "photo",
             "notes",
             "photo_path",
-            "updatedate"
+            "startdate"
         )
         write_ch_table(dim_emp, "DimEmployees")
         row_count = dim_emp.count()
@@ -389,7 +393,7 @@ def process_dim_suppliers(last_run):
                 col("phone"),
                 col("fax"),
                 col("homepage"),
-                col("updatedate").alias("updatedate")
+                col("updatedate").alias("startdate")
             )
         dim_sup = assign_incremental_keys(
             dim_sup_base,
@@ -406,7 +410,7 @@ def process_dim_suppliers(last_run):
             "phone",
             "fax",
             "homepage",
-            "updatedate"
+            "startdate"
         )
         write_ch_table(dim_sup, "DimSuppliers")
         row_count = dim_sup.count()
@@ -451,7 +455,7 @@ def process_dim_products(last_run):
                 "units_on_order",
                 "reorder_level",
                 "discontinued",
-                col("updatedate").alias("updatedate")
+                col("updatedate").alias("startdate")
             )
         dim_products = assign_incremental_keys(
             dim_products_base,
@@ -470,7 +474,7 @@ def process_dim_products(last_run):
             "units_on_order",
             "reorder_level",
             "discontinued",
-            "updatedate"
+            "startdate"
         )
         write_ch_table(dim_products, "DimProducts")
         row_count = dim_products.count()
@@ -494,7 +498,7 @@ def process_dim_shippers(last_run):
                 col("ShipperAlternateKey"),
                 col("company_name"),
                 col("phone"),
-                col("updatedate").alias("updatedate")
+                col("updatedate").alias("startdate")
             )
         dim_shippers = assign_incremental_keys(
             dim_shippers_base,
@@ -506,7 +510,7 @@ def process_dim_shippers(last_run):
             "ShipperAlternateKey",
             "company_name",
             "phone",
-            "updatedate"
+            "startdate"
         )
         write_ch_table(dim_shippers, "DimShippers")
         row_count = dim_shippers.count()
@@ -535,15 +539,11 @@ def process_dim_territories(last_run):
             .withColumn("TerritoryDescription", trim(col("terr.territory_description"))) \
             .withColumn("RegionDescription", col("reg.RegionDescription")) \
             .withColumn("StartDate", col("terr.updatedate").cast(TimestampType())) \
-            .withColumn("EndDate", lit(None).cast(TimestampType())) \
-            .withColumn("updatedate", col("terr.updatedate")) \
             .select(
                 "TerritoryAlternateKey",
                 "RegionDescription",
                 "TerritoryDescription",
                 "StartDate",
-                "EndDate",
-                "updatedate"
             )
         dim_terr = assign_incremental_keys(
             dim_terr_base,
@@ -556,8 +556,6 @@ def process_dim_territories(last_run):
             "RegionDescription",
             "TerritoryDescription",
             "StartDate",
-            "EndDate",
-            "updatedate"
         )
         write_ch_table(dim_terr, "DimTerritories")
         row_count = dim_terr.count()
@@ -597,9 +595,9 @@ def process_fact_employee_territories(last_run):
         pairs = df_changed.select(
             col("employee_id").cast("string").alias("EmployeeAlternateKey"),
             col("territory_id").cast("string").alias("TerritoryAlternateKey"),
-            col("updatedate")
+            col("updatedate").alias("startdate")
         ).groupBy("EmployeeAlternateKey", "TerritoryAlternateKey") \
-         .agg(max("updatedate").alias("updatedate"))
+         .agg(max("startdate").alias("startdate"))
         total_pairs = pairs.count()
 
         fact = pairs \
@@ -613,7 +611,7 @@ def process_fact_employee_territories(last_run):
                    .select(
                         "EmployeeKey",
                         "TerritoryKey",
-                        "updatedate"
+                        "startdate"
                    ).dropna(subset=["EmployeeKey", "TerritoryKey"])
 
         existing_pairs = None
@@ -637,7 +635,7 @@ def process_fact_employee_territories(last_run):
             "FactEmployeeTerritoryKey",
             "EmployeeKey",
             "TerritoryKey",
-            "updatedate"
+            "startdate"
         )
 
         row_count = fact.count()
@@ -715,7 +713,7 @@ def process_fact_orders(last_run):
                 col("od.unit_price").alias("UnitPrice"),
                 (col("od.quantity") * col("od.unit_price")).alias("TotalAmount"),
                 col("o.freight").alias("Freight"),
-                col("o.updatedate").alias("updatedate")
+                col("o.updatedate").alias("startdate")
             )
 
         total_before_filter = fact.count()
@@ -762,7 +760,7 @@ def process_fact_orders(last_run):
             "UnitPrice",
             "TotalAmount",
             "Freight",
-            "updatedate"
+            "startdate"
         )
 
         row_count = fact.count()
