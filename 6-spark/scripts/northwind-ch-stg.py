@@ -8,7 +8,6 @@ from pyspark.sql.functions import expr, date_format
 from pyspark.sql.utils import AnalysisException
 from pyspark import SparkConf
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,7 +17,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Spark session with error handling
 try:
     spark = SparkSession.builder \
         .appName("northwind_ch_stg") \
@@ -28,7 +26,6 @@ except Exception as e:
     logger.error(f"Failed to create Spark session: {e}", exc_info=True)
     sys.exit(1)
 
-# Set log level for Spark to reduce noise, but keep our logging
 spark.sparkContext.setLogLevel("WARN")
 
 
@@ -42,19 +39,6 @@ driver = "com.clickhouse.jdbc.ClickHouseDriver"
 
 
 def readDataFromTopics(kafka_topic, schema):
-    """
-    Read data from Kafka topic and parse JSON payload.
-    
-    Args:
-        kafka_topic: Kafka topic name
-        schema: Schema for parsing JSON payload
-        
-    Returns:
-        DataFrame with parsed payload
-        
-    Raises:
-        Exception: If Kafka read or parsing fails
-    """
     try:
         logger.info(f"Reading from Kafka topic: {kafka_topic}")
         df = (
@@ -63,7 +47,7 @@ def readDataFromTopics(kafka_topic, schema):
             .option("kafka.bootstrap.servers", kafka_bootstrap_servers)
             .option("subscribe", kafka_topic)
             .option("startingOffsets", "earliest")
-            .option("failOnDataLoss", "false")  # Don't fail on data loss
+            .option("failOnDataLoss", "false") 
             .load()
         )
         logger.info(f"Successfully connected to Kafka topic: {kafka_topic}")
@@ -81,21 +65,8 @@ def readDataFromTopics(kafka_topic, schema):
         raise
 
 def transformDebeziumPayload(parsed_df):
-    """
-    Transform Debezium CDC payload to extract actual data fields.
-    
-    Args:
-        parsed_df: DataFrame with parsed Debezium payload
-        
-    Returns:
-        Transformed DataFrame with business fields
-        
-    Raises:
-        Exception: If transformation fails
-    """
     try:
         logger.debug("Transforming Debezium payload")
-        # Remove tombstone messages
         parsed_df = parsed_df.filter(col("payload").isNotNull())
         
         payload_schema = parsed_df.schema["payload"].dataType
@@ -118,19 +89,6 @@ def transformDebeziumPayload(parsed_df):
         raise
 
 def transformDate(final_df, dateColumns):
-    """
-    Transform date columns from numeric format to yyyyMMdd format.
-    
-    Args:
-        final_df: DataFrame to transform
-        dateColumns: List of date column names to transform
-        
-    Returns:
-        DataFrame with transformed date columns
-        
-    Raises:
-        Exception: If date transformation fails
-    """
     try:
         logger.debug(f"Transforming date columns: {dateColumns}")
         for dateColumn in dateColumns:
@@ -155,23 +113,7 @@ def transformDate(final_df, dateColumns):
 streams = []
 
 def foreach_batch_factory(table_name):
-    """
-    Factory function to create foreachBatch handler for a specific table.
-    
-    Args:
-        table_name: Target ClickHouse table name
-        
-    Returns:
-        foreachBatch handler function
-    """
     def foreach_batch(batch_df, batch_id):
-        """
-        Process each micro-batch and write to ClickHouse.
-        
-        Args:
-            batch_df: DataFrame for current batch
-            batch_id: Unique batch identifier
-        """
         try:
             row_count = batch_df.count()
             logger.info(f"Processing batch {batch_id} for table {table_name}: {row_count} rows")
@@ -180,7 +122,6 @@ def foreach_batch_factory(table_name):
                 logger.debug(f"Batch {batch_id} for table {table_name} is empty, skipping write")
                 return
 
-            # Write to ClickHouse with retry logic
             max_retries = 3
             retry_count = 0
             while retry_count < max_retries:
@@ -211,20 +152,18 @@ def foreach_batch_factory(table_name):
                             f"Retry {retry_count}/{max_retries} for batch {batch_id} table {table_name}: {write_error}"
                         )
                         import time
-                        time.sleep(2 ** retry_count)  # Exponential backoff
+                        time.sleep(2 ** retry_count) 
                         
         except Exception as e:
             logger.error(
                 f"Error processing batch {batch_id} for table {table_name}: {e}",
                 exc_info=True
             )
-            # Re-raise to let Spark handle the failure
             raise
             
     return foreach_batch
 
 
-# Main execution with error handling
 try:
     logger.info("Starting streaming job for all tables")
     logger.info(f"Total tables to process: {len(table_mapping)}")
@@ -233,13 +172,9 @@ try:
         try:
             logger.info(f"Setting up stream for table: {table}, topic: {topic}")
             
-            # Read from Kafka
             df = readDataFromTopics(topic, schema)
-            
-            # Transform Debezium payload
             transformed_df = transformDebeziumPayload(df)
 
-            # Apply date transformations for specific tables
             if table == "northwind.northwind_employees":
                 logger.debug(f"Applying date transformation for {table}")
                 transformed_df = transformDate(transformed_df, ["birth_date", "hire_date"])
@@ -248,12 +183,11 @@ try:
                 logger.debug(f"Applying date transformation for {table}")
                 transformed_df = transformDate(transformed_df, ["order_date", "required_date", "shipped_date"])
 
-            # Create and start stream
             stream = (
                 transformed_df.writeStream
                 .foreachBatch(foreach_batch_factory(table))
                 .option("checkpointLocation", f"/tmp/spark_checkpoints/{table}")
-                .option("maxFilesPerTrigger", 100)  # Limit files per trigger
+                .option("maxFilesPerTrigger", 100)  
                 .start()
             )
 
@@ -265,7 +199,6 @@ try:
                 f"Failed to set up stream for table {table} (topic {topic}): {e}",
                 exc_info=True
             )
-            # Continue with other tables instead of failing completely
             continue
 
     if not streams:
@@ -274,14 +207,12 @@ try:
     
     logger.info(f"Successfully started {len(streams)} streams. Waiting for termination...")
     
-    # Wait for all streams to terminate
     for i, stream in enumerate(streams):
         try:
             logger.info(f"Waiting for stream {i+1}/{len(streams)} to terminate")
             stream.awaitTermination()
         except Exception as e:
             logger.error(f"Stream {i+1} terminated with error: {e}", exc_info=True)
-            # Continue waiting for other streams
             
 except KeyboardInterrupt:
     logger.info("Received interrupt signal. Stopping all streams...")
@@ -294,7 +225,6 @@ except KeyboardInterrupt:
     
 except Exception as e:
     logger.error(f"Fatal error in streaming job: {e}", exc_info=True)
-    # Stop all streams on fatal error
     for stream in streams:
         try:
             stream.stop()

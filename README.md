@@ -252,14 +252,10 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 
 
 ## Todo List
-- [ ] Fix SupplierKey mapping in northwind-dw.py - map supplier_id to SupplierKey from DimSuppliers
-- [ ] Fix employee_id type mismatch in northwind-dw.py - convert String to Integer for DimEmployees lookup
-- [ ] Add error handling and logging to Spark jobs (northwind-ch-stg.py and northwind-dw.py)
-- [ ] Move hardcoded credentials to environment variables
-- [ ] Add Docker health checks to all containers in docker-compose files
-- [ ] Create single startup script to start all services in correct order
 - [ ] Add data quality checks before writing to ClickHouse
 - [ ] ClickHouse replicatin tables data 
 - [ ] add volumes to docker-compose files
+
+
 #local run 
 /opt/bitnami/spark# /opt/bitnami/spark/bin/spark-submit    --master spark://spark-master:${SPARK_MASTER_PORT:-7077}    --driver-memory 1g   --executor-memory 1g   --conf spark.executor.instances=1   --conf spark.executor.cores=2   --conf spark.cores.max=4   --conf spark.sql.shuffle.partitions=10   /opt/bitnami/spark/scripts/northwind-dw.py

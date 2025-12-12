@@ -18,7 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ------------- config -------------
 CLICKHOUSE_URL = "jdbc:ch://clickhouse1:8123/default"
 CLICKHOUSE_USER = "default"
 CLICKHOUSE_PASS = "123456"
@@ -26,9 +25,7 @@ CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver"
 
 LAST_RUN_FILE = "last_run.txt"   
 POLL_INTERVAL_SEC = 20         
-# ----------------------------------
 
-# Initialize Spark session with error handling
 try:
     spark = SparkSession.builder \
         .appName("northwind_incremental_etl") \
@@ -38,13 +35,9 @@ except Exception as e:
     logger.error(f"Failed to create Spark session: {e}", exc_info=True)
     sys.exit(1)
 
-# Set log level for Spark to reduce noise, but keep our logging
 spark.sparkContext.setLogLevel("WARN")
 
 def read_ch_table(table, where_clause=None):
-    """
-    Read data from ClickHouse table.
-    """
     try:
         logger.debug(f"Reading from ClickHouse table: {table}" + (f" with WHERE: {where_clause}" if where_clause else ""))
         reader = spark.read.format("jdbc") \
@@ -54,7 +47,6 @@ def read_ch_table(table, where_clause=None):
             .option("password", CLICKHOUSE_PASS) \
             .option("dbtable", table)
         if where_clause:
-            # use subquery to apply WHERE when driver needs
             sql = f"(SELECT * FROM {table} WHERE {where_clause} ) as t"
             reader = reader.option("dbtable", sql)
         df = reader.load()
@@ -66,11 +58,7 @@ def read_ch_table(table, where_clause=None):
 
 
 def write_ch_table(df, table_name, mode="append"):
-    """
-    Write DataFrame to ClickHouse table.
-    """
     try:
-        # avoid expensive full count in normal path
         try:
             row_count = df.limit(1).count()
         except Exception:
@@ -111,10 +99,6 @@ def table_has_rows(table_name):
 
 
 def get_max_key(table_name, key_column):
-    """
-    Retrieve the current maximum surrogate key from a ClickHouse table.
-    Returns 0 if the table is empty or cannot be queried.
-    """
     try:
         df = spark.read.format("jdbc") \
             .option("driver", CLICKHOUSE_DRIVER) \
@@ -132,8 +116,6 @@ def get_max_key(table_name, key_column):
 
 
 def assign_incremental_keys(df, key_column, natural_key_cols, target_table, existing_df=None):
-    """
-    """
     try:
         if existing_df is None:
             try:
@@ -179,9 +161,6 @@ def assign_incremental_keys(df, key_column, natural_key_cols, target_table, exis
         raise
 
 def initialize_dim_date():
-    """
-    Populates DimDate with dates 1970-01-01 .. 2050-12-31 on the first run.
-    """
     try:
         if table_has_rows("DimDate"):
             logger.info("DimDate already populated - skipping initialization")
@@ -237,9 +216,6 @@ def initialize_dim_date():
         raise
 
 def get_last_run():
-    """
-    Get the last run timestamp from file.
-    """
     try:
         if not os.path.exists(LAST_RUN_FILE):
             start = (datetime.now(timezone.utc) - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
@@ -251,15 +227,11 @@ def get_last_run():
             return last_run
     except Exception as e:
         logger.error(f"Failed to read last run file {LAST_RUN_FILE}: {e}", exc_info=True)
-        # Return default on error
         start = (datetime.now(timezone.utc) - timedelta(days=3650)).strftime("%Y-%m-%d %H:%M:%S")
         logger.warning(f"Using default timestamp due to error: {start}")
         return start
 
 def set_last_run(ts):
-    """
-    Save the last run timestamp to file.
-    """
     try:
         logger.debug(f"Writing last run timestamp: {ts}")
         with open(LAST_RUN_FILE, "w") as f:
@@ -287,11 +259,7 @@ def add_to_geo(df_changed) :
     final_dim_geo = read_ch_table("DimGeography")
     return final_dim_geo , df_changed
 
-# ---------------- transformations for dimensions ----------------
 def process_dim_customers(last_run):
-    """
-    Process DimCustomer dimension table.
-    """
     try:
         logger.info("Processing DimCustomer")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'" 
@@ -339,9 +307,6 @@ def process_dim_customers(last_run):
         raise
 
 def process_dim_employees(last_run):
-    """
-    Process DimEmployees dimension table.
-    """
     try:
         logger.info("Processing DimEmployees")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
@@ -350,9 +315,6 @@ def process_dim_employees(last_run):
             logger.debug("DimEmployees: no changes")
             return
         dim_geo , df_changed  = add_to_geo(df_changed) 
-        df_changed.show(10 , False)     
-        dim_geo.show(10 , False)     
-
         dim_emp_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("EmployeeAlternateKey", col("employee_id").cast("string")) \
             .withColumnRenamed("reports_to","ParentEmployeeKey") \
@@ -375,7 +337,6 @@ def process_dim_employees(last_run):
                 col("photo_path"),
                 col("updatedate").alias("updatedate")
             )
-        dim_emp_base.show(10,False)
         dim_emp = assign_incremental_keys(
             dim_emp_base,
             "EmployeeKey",
@@ -408,9 +369,6 @@ def process_dim_employees(last_run):
         raise
 
 def process_dim_suppliers(last_run):
-    """
-    Process DimSuppliers dimension table.
-    """
     try:
         logger.info("Processing DimSuppliers")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
@@ -459,9 +417,6 @@ def process_dim_suppliers(last_run):
         raise
 
 def process_dim_products(last_run):
-    """
-    Process DimProducts dimension table.
-    """
     try:
         logger.info("Processing DimProducts")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
@@ -526,9 +481,6 @@ def process_dim_products(last_run):
         raise
 
 def process_dim_shippers(last_run):
-    """
-    Process DimShippers dimension table.
-    """
     try:
         logger.info("Processing DimShippers")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
@@ -565,9 +517,6 @@ def process_dim_shippers(last_run):
         raise
 
 def process_dim_territories(last_run):
-    """
-    Process DimTerritories dimension table.
-    """
     try:
         logger.info("Processing DimTerritories")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
@@ -618,11 +567,7 @@ def process_dim_territories(last_run):
         logger.error(f"Failed to process DimTerritories: {e}", exc_info=True)
         raise
 
-# ---------------- Fact processing ----------------
 def process_fact_employee_territories(last_run):
-    """
-    Process FactEmployeeTerritories fact table.
-    """
     try:
         logger.info("Processing FactEmployeeTerritories")
         where_clause = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
@@ -714,9 +659,6 @@ def process_fact_employee_territories(last_run):
 
 
 def process_fact_orders(last_run):
-    """
-    Process FactOrders fact table.
-    """
     try:
         logger.info("Processing FactOrders")
         where_o = f"updatedate > toDateTime('{last_run}')"
@@ -783,7 +725,6 @@ def process_fact_orders(last_run):
         null_shipper = fact.filter(col("ShipperKey").isNull()).count()
         logger.info(f"FactOrders: before filtering - total: {total_before_filter}, NULL CustomerKey: {null_customer}, NULL EmployeeKey: {null_employee}, NULL ProductKey: {null_product}, NULL ShipperKey: {null_shipper}")
         
-        # Filter out rows with NULL dimension keys (required by ClickHouse schema)
         fact = fact.dropna(subset=["CustomerKey", "EmployeeKey", "ProductKey", "ShipperKey"])
         
         if fact.rdd.isEmpty():
@@ -833,24 +774,18 @@ def process_fact_orders(last_run):
         logger.error(f"Failed to process FactOrders: {e}", exc_info=True)
         raise
 
-# ---------------- main run ----------------
 def main_once():
-    """
-    Execute one ETL run.
-    """
     try:
         last_run = get_last_run()
         logger.info(f"Starting ETL run with last_run = {last_run}")
         now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-        # ensure static dimensions are seeded
         try:
             initialize_dim_date()
         except Exception as e:
             logger.error(f"Failed to initialize DimDate: {e}", exc_info=True)
             raise
 
-        # process dimensions (only those with updatedate)
         dimension_processors = [
             ("DimCustomer", process_dim_customers),
             ("DimEmployees", process_dim_employees),
@@ -865,10 +800,7 @@ def main_once():
                 processor(last_run)
             except Exception as e:
                 logger.error(f"Failed to process {dim_name}: {e}", exc_info=True)
-                # Continue with other dimensions instead of failing completely
                 continue
-
-        # process facts
         fact_processors = [
             ("FactEmployeeTerritories", process_fact_employee_territories),
             ("FactOrders", process_fact_orders),
@@ -879,16 +811,12 @@ def main_once():
                 processor(last_run)
             except Exception as e:
                 logger.error(f"Failed to process {fact_name}: {e}", exc_info=True)
-                # Continue with other facts instead of failing completely
                 continue
-
-        # update last_run only after successful processing
         try:
             set_last_run(now_ts)
             logger.info(f"ETL run completed successfully. Updated last_run -> {now_ts}")
         except Exception as e:
             logger.error(f"Failed to update last_run timestamp: {e}", exc_info=True)
-            # Don't raise - the processing was successful
             
     except Exception as e:
         logger.error(f"Fatal error in ETL run: {e}", exc_info=True)
@@ -897,7 +825,6 @@ def main_once():
 if __name__ == "__main__":
     try:
         logger.info("Starting incremental ETL job")
-        # Optionally: run in a loop (or schedule via cron/systemd)
         while True:
             try:
                 main_once()
@@ -906,7 +833,6 @@ if __name__ == "__main__":
                 break
             except Exception as e:
                 logger.error(f"Error in ETL run, will retry after {POLL_INTERVAL_SEC} seconds: {e}", exc_info=True)
-                # Continue loop to retry
             time.sleep(POLL_INTERVAL_SEC)
     except Exception as e:
         logger.error(f"Fatal error in ETL job: {e}", exc_info=True)
