@@ -261,17 +261,5 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 - [ ] Add data quality checks before writing to ClickHouse
 - [ ] ClickHouse replicatin tables data 
 - [ ] add volumes to docker-compose files
-
-
-
-You are a data engineering expert.
-I have a real-time CDC data pipeline
-The entire pipeline is already running in Docker, and you do not need to check or modify any service.
-You are allowed to insert or simulate new data entries into PostgreSQL (conceptually).
-You are not allowed to modify any code, configuration, schema, or Docker settings.
-task : 
-check the entire project and find spark scripts issues
-
-
-
-
+#local run 
+/opt/bitnami/spark# /opt/bitnami/spark/bin/spark-submit    --master spark://spark-master:${SPARK_MASTER_PORT:-7077}    --driver-memory 1g   --executor-memory 1g   --conf spark.executor.instances=1   --conf spark.executor.cores=2   --conf spark.cores.max=4   --conf spark.sql.shuffle.partitions=10   /opt/bitnami/spark/scripts/northwind-dw.py

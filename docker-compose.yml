@@ -97,7 +97,7 @@ services:
       VALUE_CONVERTER: ${VALUE_CONVERTER:-org.apache.kafka.connect.json.JsonConverter}
       ENABLE_DEBEZIUM_SCRIPTING: ${ENABLE_DEBEZIUM_SCRIPTING:-true}
     ports:
-      - "8083:8083"
+      - "18083:8083"
     networks:
       - ProjectHost
     healthcheck:
@@ -118,7 +118,7 @@ services:
     entrypoint: >
       sh -c "
       echo 'Waiting for Debezium Connect to be ready...' &&
-      sleep 15 &&
+      sleep 10 &&
       echo 'Registering PostgreSQL connector...' &&
       curl -X POST http://debezium-connect:8083/connectors
       -H 'Content-Type: application/json'
@@ -205,7 +205,7 @@ services:
     entrypoint: >
       bash -c "
         /entrypoint.sh &
-        sleep 15
+        sleep 10
         clickhouse-client --multiquery < /tmp/init-db/init.sql
         wait
       "
@@ -248,7 +248,7 @@ services:
     entrypoint: >
       bash -c "
         /entrypoint.sh &
-        sleep 15
+        sleep 10
         clickhouse-client --multiquery < /tmp/init-db/init.sql
         wait
       "
@@ -273,7 +273,7 @@ services:
       SPARK_SSL_ENABLED: ${SPARK_SSL_ENABLED:-no}
       HOME: /tmp
     ports:
-      - "8085:8080"
+      - "18085:8080"
       - "7077:7077"
     volumes:
       - ./6-spark/scripts:/opt/bitnami/spark/scripts
@@ -399,18 +399,18 @@ services:
     volumes:
       - ./6-spark/scripts:/opt/bitnami/spark/scripts
       - ./6-spark/conf:/opt/bitnami/spark/conf
-    command:
-      [
-        "/opt/bitnami/spark/bin/spark-submit",
-        "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
-        "--driver-memory", "1g",
-        "--executor-memory", "1g",
-        "--conf", "spark.executor.instances=1",
-        "--conf", "spark.executor.cores=2",
-        "--conf", "spark.cores.max=4",
-        "--conf", "spark.sql.shuffle.partitions=10",
-        "/opt/bitnami/spark/scripts/northwind-dw.py"
-      ]
+    # command:
+    #   [
+    #     "/opt/bitnami/spark/bin/spark-submit",
+    #     "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
+    #     "--driver-memory", "1g",
+    #     "--executor-memory", "1g",
+    #     "--conf", "spark.executor.instances=1",
+    #     "--conf", "spark.executor.cores=2",
+    #     "--conf", "spark.cores.max=4",
+    #     "--conf", "spark.sql.shuffle.partitions=10",
+    #     "/opt/bitnami/spark/scripts/northwind-dw.py"
+    #   ]
     networks:
       - ProjectHost
     restart: unless-stopped

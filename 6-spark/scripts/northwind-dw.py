@@ -1,4 +1,3 @@
-# incremental_etl.py
 import os
 import sys
 import logging
@@ -8,8 +7,8 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import TimestampType
 import time 
 from pyspark.sql.window import Window
+from pyspark.sql.functions import coalesce, lit
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -45,16 +44,6 @@ spark.sparkContext.setLogLevel("WARN")
 def read_ch_table(table, where_clause=None):
     """
     Read data from ClickHouse table.
-    
-    Args:
-        table: Table name to read from
-        where_clause: Optional WHERE clause for filtering
-        
-    Returns:
-        DataFrame with table data
-        
-    Raises:
-        Exception: If read operation fails
     """
     try:
         logger.debug(f"Reading from ClickHouse table: {table}" + (f" with WHERE: {where_clause}" if where_clause else ""))
@@ -69,27 +58,24 @@ def read_ch_table(table, where_clause=None):
             sql = f"(SELECT * FROM {table} WHERE {where_clause} ) as t"
             reader = reader.option("dbtable", sql)
         df = reader.load()
-        logger.debug(f"Successfully read {df.count()} rows from {table}")
+        logger.debug(f"Successfully read table {table}")
         return df
     except Exception as e:
         logger.error(f"Failed to read from ClickHouse table {table}: {e}", exc_info=True)
         raise
 
+
 def write_ch_table(df, table_name, mode="append"):
     """
     Write DataFrame to ClickHouse table.
-    
-    Args:
-        df: DataFrame to write
-        table_name: Target table name
-        mode: Write mode (append, overwrite, etc.)
-        
-    Raises:
-        Exception: If write operation fails
     """
     try:
-        row_count = df.count()
-        logger.debug(f"Writing {row_count} rows to ClickHouse table: {table_name} (mode: {mode})")
+        # avoid expensive full count in normal path
+        try:
+            row_count = df.limit(1).count()
+        except Exception:
+            row_count = None
+        logger.debug(f"Writing to ClickHouse table: {table_name} (mode: {mode}) rows_sample: {row_count}")
         
         df.write.format("jdbc") \
             .option("driver", CLICKHOUSE_DRIVER) \
@@ -100,21 +86,13 @@ def write_ch_table(df, table_name, mode="append"):
             .mode(mode) \
             .save()
         
-        logger.debug(f"Successfully wrote {row_count} rows to {table_name}")
+        logger.debug(f"Successfully wrote to {table_name}")
     except Exception as e:
         logger.error(f"Failed to write to ClickHouse table {table_name}: {e}", exc_info=True)
         raise
 
+
 def table_has_rows(table_name):
-    """
-    Returns True if the ClickHouse table already contains data.
-    
-    Args:
-        table_name: Table name to check
-        
-    Returns:
-        True if table has rows, False otherwise
-    """
     try:
         logger.debug(f"Checking if table {table_name} has rows")
         df = spark.read.format("jdbc") \
@@ -155,16 +133,13 @@ def get_max_key(table_name, key_column):
 
 def assign_incremental_keys(df, key_column, natural_key_cols, target_table, existing_df=None):
     """
-    Assign incremental surrogate keys based on existing keys in the target table.
-    - Reuses existing keys when natural keys already exist.
-    - Generates new keys starting after the current max key.
     """
     try:
-        # Pull existing mappings if none provided
         if existing_df is None:
             try:
                 existing_df = read_ch_table(target_table).select(
-                    col(key_column), *[col(c) for c in natural_key_cols]
+                    col(key_column),
+                    *[col(c) for c in natural_key_cols]
                 )
                 if existing_df.rdd.isEmpty():
                     existing_df = None
@@ -173,24 +148,32 @@ def assign_incremental_keys(df, key_column, natural_key_cols, target_table, exis
                 existing_df = None
 
         if existing_df is not None:
-            df = df.join(existing_df, on=natural_key_cols, how="left")
+            df_with_existing = df.join(existing_df, on=natural_key_cols, how="left")
         else:
-            df = df.withColumn(key_column, lit(None).cast("long"))
+            df_with_existing = df.withColumn(key_column, lit(None).cast("long"))
 
-        # New rows without a surrogate key
-        new_rows = df.filter(col(key_column).isNull())
+        new_rows = df_with_existing.filter(col(key_column).isNull())
+        existing_rows = df_with_existing.filter(col(key_column).isNotNull())
+
         if not new_rows.rdd.isEmpty():
             offset = get_max_key(target_table, key_column)
-            window = Window.orderBy(*[col(c) for c in natural_key_cols])
-            new_rows = new_rows.withColumn(
-                key_column,
-                (row_number().over(window) + lit(offset)).cast("long")
-            )
-            existing_rows = df.filter(col(key_column).isNotNull())
-            df = existing_rows.unionByName(new_rows, allowMissingColumns=True)
+            new_rows = new_rows.withColumn("__mid", monotonically_increasing_id())
 
-        df = df.withColumn(key_column, col(key_column).cast("long"))
-        return df
+            global_window = Window.orderBy(col("__mid"))
+            new_rows = new_rows.withColumn("__rn_new", row_number().over(global_window)) \
+                               .withColumn(key_column, (col("__rn_new") + lit(offset)).cast("long")) \
+                               .drop("__mid", "__rn_new")
+
+        if existing_rows.rdd.isEmpty():
+            result_df = new_rows
+        elif new_rows.rdd.isEmpty():
+            result_df = existing_rows
+        else:
+            result_df = existing_rows.unionByName(new_rows, allowMissingColumns=True)
+
+        result_df = result_df.withColumn(key_column, col(key_column).cast("long"))
+        return result_df
+
     except Exception as exc:
         logger.error(f"Failed to assign incremental keys for {target_table}: {exc}", exc_info=True)
         raise
@@ -198,9 +181,6 @@ def assign_incremental_keys(df, key_column, natural_key_cols, target_table, exis
 def initialize_dim_date():
     """
     Populates DimDate with dates 1970-01-01 .. 2050-12-31 on the first run.
-    
-    Raises:
-        Exception: If initialization fails
     """
     try:
         if table_has_rows("DimDate"):
@@ -259,12 +239,6 @@ def initialize_dim_date():
 def get_last_run():
     """
     Get the last run timestamp from file.
-    
-    Returns:
-        Last run timestamp string, or default (10 years ago) if file doesn't exist
-        
-    Raises:
-        Exception: If file read fails
     """
     try:
         if not os.path.exists(LAST_RUN_FILE):
@@ -285,12 +259,6 @@ def get_last_run():
 def set_last_run(ts):
     """
     Save the last run timestamp to file.
-    
-    Args:
-        ts: Timestamp string to save
-        
-    Raises:
-        Exception: If file write fails
     """
     try:
         logger.debug(f"Writing last run timestamp: {ts}")
@@ -301,16 +269,28 @@ def set_last_run(ts):
         logger.error(f"Failed to write last run file {LAST_RUN_FILE}: {e}", exc_info=True)
         raise
 
+def add_to_geo(df_changed) : 
+    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
+                        .withColumn("region", coalesce("region", lit("Unknown"))) \
+                        .withColumn("city", coalesce("city", lit("Unknown"))) \
+                        .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+                        .withColumn("address", coalesce("address", lit("Unknown")))
+    geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
+
+    geo_out = assign_incremental_keys(
+        geo,
+        "GeographyKey",
+        ["country","region","city","postal_code","address"],
+        "DimGeography"
+    )
+    write_ch_table(geo_out , "DimGeography")
+    final_dim_geo = read_ch_table("DimGeography")
+    return final_dim_geo , df_changed
+
 # ---------------- transformations for dimensions ----------------
 def process_dim_customers(last_run):
     """
     Process DimCustomer dimension table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing DimCustomer")
@@ -320,22 +300,7 @@ def process_dim_customers(last_run):
             logger.debug("DimCustomer: no changes")
             return
         
-        from pyspark.sql.functions import coalesce, lit
-        df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                               .withColumn("region", coalesce("region", lit("Unknown"))) \
-                               .withColumn("city", coalesce("city", lit("Unknown"))) \
-                               .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                               .withColumn("address", coalesce("address", lit("Unknown")))
-        geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
-        geo_out = assign_incremental_keys(
-            geo,
-            "GeographyKey",
-            ["country","region","city","postal_code","address"],
-            "DimGeography"
-        )
-        write_ch_table(geo_out.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
-
-        dim_geo = geo_out.select("GeographyKey","country","region","city","postal_code","address")
+        dim_geo , df_changed  = add_to_geo(df_changed)
         dim_customer_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumnRenamed("customer_id","CustomerAlternateKey") \
             .select(
@@ -348,6 +313,7 @@ def process_dim_customers(last_run):
                 col("fax"),
                 col("updatedate").alias("updatedate")
             )
+
         dim_customer = assign_incremental_keys(
             dim_customer_base,
             "CustomerKey",
@@ -375,12 +341,6 @@ def process_dim_customers(last_run):
 def process_dim_employees(last_run):
     """
     Process DimEmployees dimension table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing DimEmployees")
@@ -389,21 +349,9 @@ def process_dim_employees(last_run):
         if df_changed.rdd.isEmpty():
             logger.debug("DimEmployees: no changes")
             return
-        
-        from pyspark.sql.functions import coalesce, lit
-        df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                               .withColumn("region", coalesce("region", lit("Unknown"))) \
-                               .withColumn("city", coalesce("city", lit("Unknown"))) \
-                               .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                               .withColumn("address", coalesce("address", lit("Unknown")))
-        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
-        dim_geo = assign_incremental_keys(
-            dim_geo,
-            "GeographyKey",
-            ["country","region","city","postal_code","address"],
-            "DimGeography"
-        )
-        write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
+        dim_geo , df_changed  = add_to_geo(df_changed) 
+        df_changed.show(10 , False)     
+        dim_geo.show(10 , False)     
 
         dim_emp_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("EmployeeAlternateKey", col("employee_id").cast("string")) \
@@ -427,6 +375,7 @@ def process_dim_employees(last_run):
                 col("photo_path"),
                 col("updatedate").alias("updatedate")
             )
+        dim_emp_base.show(10,False)
         dim_emp = assign_incremental_keys(
             dim_emp_base,
             "EmployeeKey",
@@ -461,12 +410,6 @@ def process_dim_employees(last_run):
 def process_dim_suppliers(last_run):
     """
     Process DimSuppliers dimension table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing DimSuppliers")
@@ -476,21 +419,7 @@ def process_dim_suppliers(last_run):
             logger.debug("DimSuppliers: no changes")
             return
         
-        from pyspark.sql.functions import coalesce, lit
-        df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                               .withColumn("region", coalesce("region", lit("Unknown"))) \
-                               .withColumn("city", coalesce("city", lit("Unknown"))) \
-                               .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                               .withColumn("address", coalesce("address", lit("Unknown")))
-        dim_geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
-        dim_geo = assign_incremental_keys(
-            dim_geo,
-            "GeographyKey",
-            ["country","region","city","postal_code","address"],
-            "DimGeography"
-        )
-        write_ch_table(dim_geo.select("GeographyKey","country","region","city","postal_code","address"), "DimGeography")
-
+        dim_geo , df_changed  = add_to_geo(df_changed)
         dim_sup_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("SupplierAlternateKey", col("supplier_id").cast("string")) \
             .select(
@@ -532,12 +461,6 @@ def process_dim_suppliers(last_run):
 def process_dim_products(last_run):
     """
     Process DimProducts dimension table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing DimProducts")
@@ -605,12 +528,6 @@ def process_dim_products(last_run):
 def process_dim_shippers(last_run):
     """
     Process DimShippers dimension table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing DimShippers")
@@ -650,12 +567,6 @@ def process_dim_shippers(last_run):
 def process_dim_territories(last_run):
     """
     Process DimTerritories dimension table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing DimTerritories")
@@ -711,12 +622,6 @@ def process_dim_territories(last_run):
 def process_fact_employee_territories(last_run):
     """
     Process FactEmployeeTerritories fact table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing FactEmployeeTerritories")
@@ -811,12 +716,6 @@ def process_fact_employee_territories(last_run):
 def process_fact_orders(last_run):
     """
     Process FactOrders fact table.
-    
-    Args:
-        last_run: Last run timestamp for incremental processing
-        
-    Raises:
-        Exception: If processing fails
     """
     try:
         logger.info("Processing FactOrders")
@@ -877,7 +776,6 @@ def process_fact_orders(last_run):
                 col("o.updatedate").alias("updatedate")
             )
 
-        # Log counts before filtering to help diagnose join issues
         total_before_filter = fact.count()
         null_customer = fact.filter(col("CustomerKey").isNull()).count()
         null_employee = fact.filter(col("EmployeeKey").isNull()).count()
@@ -939,9 +837,6 @@ def process_fact_orders(last_run):
 def main_once():
     """
     Execute one ETL run.
-    
-    Raises:
-        Exception: If ETL run fails
     """
     try:
         last_run = get_last_run()

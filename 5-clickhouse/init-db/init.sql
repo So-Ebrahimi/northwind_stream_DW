@@ -277,7 +277,7 @@ ORDER BY GeographyKey;
 CREATE TABLE DimCustomer (
     CustomerKey Int64,
     CustomerAlternateKey String,
-    GeographyKey UInt64,
+    GeographyKey Nullable(UInt64),
     CompanyName String,
     ContactName String,
     ContactTitle String,
@@ -293,7 +293,7 @@ CREATE TABLE IF NOT EXISTS DimEmployees (
     EmployeeKey Int64,
     EmployeeAlternateKey String,
     ParentEmployeeKey Nullable(Int64),
-    GeographyKey UInt64,
+    GeographyKey  Nullable(UInt64),
     FirstName String,
     LastName String,
     title String,
@@ -313,7 +313,7 @@ ORDER BY EmployeeKey;
 CREATE TABLE IF NOT EXISTS DimSuppliers (
     SupplierKey Int64,
     SupplierAlternateKey String,
-    GeographyKey UInt64,
+    GeographyKey  Nullable(UInt64),
     company_name String,
     contact_name String,
     contact_title String,
