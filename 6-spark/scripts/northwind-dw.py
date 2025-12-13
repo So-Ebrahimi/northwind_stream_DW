@@ -140,23 +140,28 @@ def assign_incremental_keys(df, key_column, natural_key_cols, target_table, exis
 
         new_rows = df_with_existing.filter(col(key_column).isNull())
         existing_rows = df_with_existing.filter(col(key_column).isNotNull())
+        new_rows = existing_rows.unionByName(
+            new_rows,
+            allowMissingColumns=True
+            )
+
 
         if not new_rows.rdd.isEmpty():
             offset = get_max_key(target_table, key_column)
             new_rows = new_rows.withColumn("__mid", monotonically_increasing_id())
 
-            global_window = Window.orderBy(col("__mid"))
+            global_window = Window.partitionBy(lit(1)).orderBy(col("__mid"))
             new_rows = new_rows.withColumn("__rn_new", row_number().over(global_window)) \
                                .withColumn(key_column, (col("__rn_new") + lit(offset)).cast("long")) \
                                .drop("__mid", "__rn_new")
 
-        if existing_rows.rdd.isEmpty():
-            result_df = new_rows
-        elif new_rows.rdd.isEmpty():
-            result_df = existing_rows
-        else:
-            result_df = existing_rows.unionByName(new_rows, allowMissingColumns=True)
-
+        # if existing_rows.rdd.isEmpty():
+        #     result_df = new_rows
+        # elif new_rows.rdd.isEmpty():
+        #     result_df = existing_rows
+        # else:
+        #     result_df = existing_rows.unionByName(new_rows, allowMissingColumns=True)
+        result_df = new_rows 
         result_df = result_df.withColumn(key_column, col(key_column).cast("long"))
         return result_df
 
@@ -167,7 +172,7 @@ def assign_incremental_keys(df, key_column, natural_key_cols, target_table, exis
 def initialize_dim_date():
     try:
         if table_has_rows("DimDate"):
-            logger.info("DimDate already populated - skipping initialization")
+            # logger.info("DimDate already populated - skipping initialization")
             return
 
         logger.info("Initializing DimDate table")
@@ -245,33 +250,63 @@ def set_last_run(ts):
         logger.error(f"Failed to write last run file {LAST_RUN_FILE}: {e}", exc_info=True)
         raise
 
-def add_to_geo(df_changed) : 
-    df_changed = df_changed.withColumn("country", coalesce("country", lit("Unknown"))) \
-                        .withColumn("region", coalesce("region", lit("Unknown"))) \
-                        .withColumn("city", coalesce("city", lit("Unknown"))) \
-                        .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
-                        .withColumn("address", coalesce("address", lit("Unknown")))
-    geo = df_changed.select("country","region","city","postal_code","address").dropDuplicates()
+def add_to_geo(df_changed):
 
-    geo_out = assign_incremental_keys(
-        geo,
-        "GeographyKey",
-        ["country","region","city","postal_code","address"],
-        "DimGeography"
-    )
-    write_ch_table(geo_out , "DimGeography")
-    final_dim_geo = read_ch_table("DimGeography")
-    return final_dim_geo , df_changed
+    df_changed = df_changed \
+        .withColumn("country", coalesce("country", lit("Unknown"))) \
+        .withColumn("region", coalesce("region", lit("Unknown"))) \
+        .withColumn("city", coalesce("city", lit("Unknown"))) \
+        .withColumn("postal_code", coalesce("postal_code", lit("Unknown"))) \
+        .withColumn("address", coalesce("address", lit("Unknown")))
+
+    geo_in = df_changed.select(
+        "country","region","city","postal_code","address"
+    ).dropDuplicates()
+    try:
+        geo_existing = read_ch_table("DimGeography").select(
+            "GeographyKey",
+            "country","region","city","postal_code","address"
+        )
+        if geo_existing.rdd.isEmpty():
+            geo_existing = None
+    except:
+        geo_existing = None
+
+    if geo_existing is not None:
+        geo_new = geo_in.join(
+            geo_existing,
+            on=["country","region","city","postal_code","address"],
+            how="left_anti"
+        )
+    else:
+        geo_new = geo_in
+
+    if not geo_new.rdd.isEmpty():
+        geo_new = assign_incremental_keys(
+            geo_new,
+            "GeographyKey",
+            ["country","region","city","postal_code","address"],
+            "DimGeography",
+            existing_df=geo_existing
+        )
+        write_ch_table(geo_new, "DimGeography")
+
+    final_dim_geo = read_ch_table("DimGeography") \
+        .dropDuplicates(
+            ["country","region","city","postal_code","address"]
+        )
+
+    return final_dim_geo, df_changed
+
 
 def process_dim_customers(last_run):
     try:
-        logger.info("Processing DimCustomer")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'" 
         df_changed = read_ch_table("northwind.northwind_customers", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimCustomer: no changes")
             return
-        
+        logger.info("Processing DimCustomer")
         dim_geo , df_changed  = add_to_geo(df_changed)
         dim_customer_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumnRenamed("customer_id","CustomerAlternateKey") \
@@ -285,7 +320,6 @@ def process_dim_customers(last_run):
                 col("fax"),
                 col("updatedate").alias("startdate")
             )
-
         dim_customer = assign_incremental_keys(
             dim_customer_base,
             "CustomerKey",
@@ -312,12 +346,12 @@ def process_dim_customers(last_run):
 
 def process_dim_employees(last_run):
     try:
-        logger.info("Processing DimEmployees")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
         df_changed = read_ch_table("northwind.northwind_employees", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimEmployees: no changes")
             return
+        logger.info("Processing DimEmployees")
         dim_geo , df_changed  = add_to_geo(df_changed) 
         dim_emp_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("EmployeeAlternateKey", col("employee_id").cast("string")) \
@@ -374,13 +408,12 @@ def process_dim_employees(last_run):
 
 def process_dim_suppliers(last_run):
     try:
-        logger.info("Processing DimSuppliers")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
         df_changed = read_ch_table("northwind.northwind_suppliers", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimSuppliers: no changes")
             return
-        
+        logger.info("Processing DimSuppliers")
         dim_geo , df_changed  = add_to_geo(df_changed)
         dim_sup_base = df_changed.join(dim_geo, on=["country","region","city","postal_code","address"], how="left") \
             .withColumn("SupplierAlternateKey", col("supplier_id").cast("string")) \
@@ -422,13 +455,12 @@ def process_dim_suppliers(last_run):
 
 def process_dim_products(last_run):
     try:
-        logger.info("Processing DimProducts")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
         df_changed = read_ch_table("northwind.northwind_products", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimProducts: no changes")
             return
-        
+        logger.info("Processing DimProducts")
         categories = read_ch_table("northwind.northwind_categories").select("category_id","category_name")
         dim_suppliers = read_ch_table("DimSuppliers").select(
             col("SupplierKey").cast("long"),
@@ -486,13 +518,12 @@ def process_dim_products(last_run):
 
 def process_dim_shippers(last_run):
     try:
-        logger.info("Processing DimShippers")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
         df_changed = read_ch_table("northwind.northwind_shippers", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimShippers: no changes")
             return
-        
+        logger.info("Processing DimShippers")
         dim_shippers_base = df_changed.withColumn("ShipperAlternateKey", col("shipper_id").cast("string")) \
             .select(
                 col("ShipperAlternateKey"),
@@ -522,13 +553,12 @@ def process_dim_shippers(last_run):
 
 def process_dim_territories(last_run):
     try:
-        logger.info("Processing DimTerritories")
         where = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
         df_changed = read_ch_table("northwind.northwind_territories", where)
         if df_changed.rdd.isEmpty():
             logger.debug("DimTerritories: no changes")
             return
-        
+        logger.info("Processing DimTerritories")
         regions = read_ch_table("northwind.northwind_region").select(
             col("region_id"),
             trim(col("region_description")).alias("RegionDescription")
@@ -567,13 +597,12 @@ def process_dim_territories(last_run):
 
 def process_fact_employee_territories(last_run):
     try:
-        logger.info("Processing FactEmployeeTerritories")
         where_clause = f"updatedate > toDateTime('{last_run}') and operation != 'd'"
         df_changed = read_ch_table("northwind.northwind_employee_territories", where_clause)
         if df_changed.rdd.isEmpty():
             logger.debug("FactEmployeeTerritories: no changes")
             return
-
+        logger.info("Processing FactEmployeeTerritories")
         try:
             dim_emp = read_ch_table("DimEmployees").select(
                 col("EmployeeAlternateKey").alias("EmployeeAlternateKeyDim"),
@@ -658,7 +687,6 @@ def process_fact_employee_territories(last_run):
 
 def process_fact_orders(last_run):
     try:
-        logger.info("Processing FactOrders")
         where_o = f"updatedate > toDateTime('{last_run}')"
         where_od = f"updatedate > toDateTime('{last_run}')"
         orders_changed = read_ch_table("northwind.northwind_orders", where_o).select("order_id").distinct()
@@ -667,7 +695,7 @@ def process_fact_orders(last_run):
         if changed_order_ids.rdd.isEmpty():
             logger.debug("FactOrders: no changed orders")
             return
-
+        logger.info("Processing FactOrders")
         changed_ids_list = [r["order_id"] for r in changed_order_ids.collect()]
         logger.info(f"FactOrders: rebuilding for {len(changed_ids_list)} orders (sample: {changed_ids_list[:5]})")
 
