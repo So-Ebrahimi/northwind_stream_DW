@@ -1,0 +1,16 @@
+ALTER TABLE DimEmployees
+UPDATE enddate = now()
+WHERE enddate IS NULL
+  AND EmployeeAlternateKey IN
+  (
+      SELECT EmployeeAlternateKey
+      FROM DimEmployees
+      GROUP BY EmployeeAlternateKey
+      HAVING count() > 1
+  )
+  AND startdate <
+  (
+      SELECT max(startdate)
+      FROM DimEmployees d2
+      WHERE d2.EmployeeAlternateKey = DimEmployees.EmployeeAlternateKey
+  );

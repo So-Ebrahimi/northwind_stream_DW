@@ -80,7 +80,7 @@ INSERT INTO employees (
 ) VALUES
   (10, 'test_l', 'test_f', 'test_t', 'test',
    '1980-05-12', '2015-04-01', 'test_address', 'test_city', 'test_region', '11111',
-   'test_country', '(111) 111-1111', 'test', '\x', 'test_notes', 2, NULL);
+   'test_country', '(111) 111-1111', 'test', '\x', 'test_notes', 2, 'test');
 
 -- EMPLOYEE TERRITORIES
 INSERT INTO employee_territories (employee_id, territory_id) VALUES
