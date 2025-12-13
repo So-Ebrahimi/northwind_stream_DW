@@ -216,48 +216,48 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ============================================
-  # ClickHouse Replica 2
-  # ============================================
-  clickhouse2:
-    image: sobhanebrahimi/clickhouse:0.1
-    container_name: clickhouse2
-    user: root
-    depends_on:
-      clickhouse-zookeeper:
-        condition: service_healthy
-    environment:
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-123456}
-    ports:
-      - "${CLICKHOUSE2_NATIVE_PORT:-29000}:9000"
-      - "${CLICKHOUSE2_HTTP_PORT:-28123}:8123"
-    ulimits:
-      nproc: 65535
-      nofile:
-        soft: 262144
-        hard: 262144
-    networks:
-      - ProjectHost
-    volumes:
-      - clickhouse2_data:/var/lib/clickhouse
-      - type: bind
-        source: ./5-clickhouse/config_replica2.xml
-        target: /etc/clickhouse-server/config.xml
-      - ./5-clickhouse/init-db/init.sql:/tmp/init-db/init.sql
-    entrypoint: >
-      bash -c "
-        /entrypoint.sh &
-        sleep 10
-        clickhouse-client --multiquery < /tmp/init-db/init.sql
-        wait
-      "
-    healthcheck:
-      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
+  # # ============================================
+  # # ClickHouse Replica 2
+  # # ============================================
+  # clickhouse2:
+  #   image: sobhanebrahimi/clickhouse:0.1
+  #   container_name: clickhouse2
+  #   user: root
+  #   depends_on:
+  #     clickhouse-zookeeper:
+  #       condition: service_healthy
+  #   environment:
+  #     CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+  #     CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-123456}
+  #   ports:
+  #     - "${CLICKHOUSE2_NATIVE_PORT:-29000}:9000"
+  #     - "${CLICKHOUSE2_HTTP_PORT:-28123}:8123"
+  #   ulimits:
+  #     nproc: 65535
+  #     nofile:
+  #       soft: 262144
+  #       hard: 262144
+  #   networks:
+  #     - ProjectHost
+  #   volumes:
+  #     - clickhouse2_data:/var/lib/clickhouse
+  #     - type: bind
+  #       source: ./5-clickhouse/config_replica2.xml
+  #       target: /etc/clickhouse-server/config.xml
+  #     - ./5-clickhouse/init-db/init.sql:/tmp/init-db/init.sql
+  #   entrypoint: >
+  #     bash -c "
+  #       /entrypoint.sh &
+  #       sleep 10
+  #       clickhouse-client --multiquery < /tmp/init-db/init.sql
+  #       wait
+  #     "
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
+  #   restart: unless-stopped
 
   # ============================================
   # Spark Master
@@ -399,18 +399,18 @@ services:
     volumes:
       - ./6-spark/scripts:/opt/bitnami/spark/scripts
       - ./6-spark/conf:/opt/bitnami/spark/conf
-    # command:
-    #   [
-    #     "/opt/bitnami/spark/bin/spark-submit",
-    #     "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
-    #     "--driver-memory", "1g",
-    #     "--executor-memory", "1g",
-    #     "--conf", "spark.executor.instances=1",
-    #     "--conf", "spark.executor.cores=2",
-    #     "--conf", "spark.cores.max=4",
-    #     "--conf", "spark.sql.shuffle.partitions=10",
-    #     "/opt/bitnami/spark/scripts/northwind-dw.py"
-    #   ]
+    command:
+      [
+        "/opt/bitnami/spark/bin/spark-submit",
+        "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
+        "--driver-memory", "1g",
+        "--executor-memory", "1g",
+        "--conf", "spark.executor.instances=1",
+        "--conf", "spark.executor.cores=2",
+        "--conf", "spark.cores.max=4",
+        "--conf", "spark.sql.shuffle.partitions=10",
+        "/opt/bitnami/spark/scripts/northwind-dw.py"
+      ]
     networks:
       - ProjectHost
     restart: unless-stopped
@@ -459,7 +459,7 @@ volumes:
     driver: local
   clickhouse1_data:
     driver: local
-  clickhouse2_data:
-    driver: local
+  # clickhouse2_data:
+  #   driver: local
   grafana_data:
     driver: local

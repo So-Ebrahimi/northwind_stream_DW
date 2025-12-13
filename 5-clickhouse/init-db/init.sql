@@ -1,7 +1,8 @@
-CREATE DATABASE IF NOT EXISTS northwind ON CLUSTER replicated_cluster;
+CREATE DATABASE IF NOT EXISTS northwind ;
+-- ON CLUSTER replicated_cluster;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_categories
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     category_id Int16,
     category_name Nullable(String),
@@ -44,7 +45,7 @@ ORDER BY category_id;
 -- ORDER BY customer_type_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_customers
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     customer_id String,
     company_name Nullable(String),
@@ -64,7 +65,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY customer_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_employees
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     employee_id Int16,
     last_name Nullable(String),
@@ -91,7 +92,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY employee_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_employee_territories
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     employee_id Int16,
     territory_id String,
@@ -102,7 +103,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY (employee_id, territory_id);
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_order_details
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     order_id Int16,
     product_id Int16,
@@ -116,7 +117,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY (order_id, product_id);
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_orders
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     order_id Int16,
     customer_id Nullable(String),
@@ -139,7 +140,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY order_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_products
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     product_id Int16,
     product_name Nullable(String),
@@ -158,7 +159,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY product_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_region
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     region_id Int16,
     region_description Nullable(String),
@@ -169,7 +170,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY region_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_shippers
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     shipper_id Int16,
     company_name Nullable(String),
@@ -181,7 +182,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY shipper_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_suppliers
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     supplier_id Int16,
     company_name Nullable(String),
@@ -202,7 +203,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY supplier_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_territories
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     territory_id String,
     territory_description Nullable(String),
@@ -214,7 +215,7 @@ ENGINE = ReplacingMergeTree(updatedate)
 ORDER BY territory_id;
 
 CREATE TABLE IF NOT EXISTS northwind.northwind_us_states
-ON CLUSTER replicated_cluster
+-- ON CLUSTER replicated_cluster
 (
     state_id Int16,
     state_name Nullable(String),

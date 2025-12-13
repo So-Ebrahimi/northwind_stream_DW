@@ -834,10 +834,10 @@
 			<host>clickhouse1</host>
 			<port>9000</port>
 		</replica>
-		<replica>
+		<!-- <replica>
 			<host>clickhouse2</host>
 			<port>9000</port>
-		</replica>
+		</replica> -->
 		</shard>
 	</replicated_cluster>
 	</remote_servers>
