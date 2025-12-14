@@ -306,6 +306,16 @@ def add_to_geo(df_changed):
         )
 
     return final_dim_geo, df_changed
+def execute_clickhouse_sql(sql: str):
+    conn = spark._jvm.java.sql.DriverManager.getConnection(
+        CLICKHOUSE_URL,
+        CLICKHOUSE_USER,
+        CLICKHOUSE_PASS
+    )
+    stmt = conn.createStatement()
+    stmt.execute(sql)
+    stmt.close()
+    conn.close()
 
 def scd2_close_previous_rows(table_name , business_key , startdate_col , enddate_col , last_run):
     try:
@@ -313,7 +323,7 @@ def scd2_close_previous_rows(table_name , business_key , startdate_col , enddate
 
         sql = f"""
         ALTER TABLE {table_name}
-        UPDATE {enddate_col} = {last_run}
+        UPDATE {enddate_col} = toDateTime('{last_run}')
         WHERE {enddate_col} IS NULL
           AND {business_key} IN (
               SELECT {business_key}
@@ -328,15 +338,7 @@ def scd2_close_previous_rows(table_name , business_key , startdate_col , enddate
               WHERE d2.{business_key} = {table_name}.{business_key}
           )
         """
-
-        spark.read.format("jdbc") \
-            .option("driver", CLICKHOUSE_DRIVER) \
-            .option("url", CLICKHOUSE_URL) \
-            .option("user", CLICKHOUSE_USER) \
-            .option("password", CLICKHOUSE_PASS) \
-            .option("query", sql) \
-            .load()
-
+        execute_clickhouse_sql(sql)
         logger.info(f"SCD2 update executed for {table_name}")
 
     except Exception as exc:
@@ -381,6 +383,7 @@ def process_dim_customers(last_run):
             "startdate"
         )
         write_ch_table(dim_customer, "DimCustomer")
+        scd2_close_previous_rows("DimCustomer" , "CustomerAlternateKey" ,"startdate" ,"enddate" , last_run)
         row_count = dim_customer.count()
         logger.info(f"DimCustomer: wrote {row_count} rows")
         
@@ -443,6 +446,7 @@ def process_dim_employees(last_run):
             "startdate"
         )
         write_ch_table(dim_emp, "DimEmployees")
+        scd2_close_previous_rows("DimEmployees" , "EmployeeAlternateKey" ,"startdate" ,"enddate" , last_run)
         row_count = dim_emp.count()
         logger.info(f"DimEmployees: wrote {row_count} rows")
         
@@ -490,6 +494,8 @@ def process_dim_suppliers(last_run):
             "startdate"
         )
         write_ch_table(dim_sup, "DimSuppliers")
+        scd2_close_previous_rows("DimSuppliers" , "SupplierAlternateKey" ,"startdate" ,"enddate" , last_run)
+
         row_count = dim_sup.count()
         logger.info(f"DimSuppliers: wrote {row_count} rows")
         
@@ -553,6 +559,7 @@ def process_dim_products(last_run):
             "startdate"
         )
         write_ch_table(dim_products, "DimProducts")
+        scd2_close_previous_rows("DimProducts" , "ProductAlternateKey" ,"startdate" ,"enddate" , last_run)
         row_count = dim_products.count()
         logger.info(f"DimProducts: wrote {row_count} rows")
         
@@ -588,6 +595,7 @@ def process_dim_shippers(last_run):
             "startdate"
         )
         write_ch_table(dim_shippers, "DimShippers")
+        scd2_close_previous_rows("DimShippers" , "ShipperAlternateKey" ,"startdate" ,"enddate" , last_run)
         row_count = dim_shippers.count()
         logger.info(f"DimShippers: wrote {row_count} rows")
         
@@ -632,6 +640,8 @@ def process_dim_territories(last_run):
             "StartDate",
         )
         write_ch_table(dim_terr, "DimTerritories")
+        scd2_close_previous_rows("DimTerritories" , "TerritoryAlternateKey" ,"startdate" ,"enddate" , last_run)
+
         row_count = dim_terr.count()
         logger.info(f"DimTerritories: wrote {row_count} rows")
         

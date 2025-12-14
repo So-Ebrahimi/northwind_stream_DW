@@ -114,3 +114,126 @@ INSERT INTO orders (
 -- ORDER DETAILS
 INSERT INTO order_details (order_id, product_id, unit_price, quantity, discount) VALUES
   (20001, 78, 10.00, 5, 0.00);
+
+
+UPDATE region
+SET region_description = 'test_region'
+WHERE region_id = 5;
+
+-- TERRITORIES
+UPDATE territories
+SET territory_description = 'test_territory',
+    region_id = 5
+WHERE territory_id = '98105';
+
+-- US STATES
+UPDATE us_states
+SET state_name = 'test_state',
+    state_abbr = 'TS',
+    state_region = 'test_region'
+WHERE state_id = 52;
+
+-- CATEGORIES
+UPDATE categories
+SET category_name = 'test_category',
+    description = 'test_description',
+    picture = 'test_picture'
+WHERE category_id = 9;
+
+-- SHIPPERS
+UPDATE shippers
+SET company_name = 'test_shipper',
+    phone = '(111) 111-1111'
+WHERE shipper_id = 7;
+
+-- SUPPLIERS
+UPDATE suppliers
+SET company_name = 'test_supplier',
+    contact_name = 'test_contact_name',
+    contact_title = 'test_contact_title',
+    address = 'test_address',
+    city = 'test_city',
+    region = 'test_region',
+    postal_code = '11111',
+    country = 'test_country',
+    phone = '(111) 111-1111',
+    fax = NULL,
+    homepage = NULL
+WHERE supplier_id = 30;
+
+-- EMPLOYEES
+UPDATE employees
+SET last_name = 'test_l',
+    first_name = 'test_f',
+    title = 'test_t',
+    title_of_courtesy = 'test',
+    birth_date = '1980-05-12',
+    hire_date = '2015-04-01',
+    address = 'test_address',
+    city = 'test_city',
+    region = 'test_region',
+    postal_code = '11111',
+    country = 'test_country',
+    home_phone = '(111) 111-1111',
+    extension = 'test',
+    photo = '\x',
+    notes = 'test_notes',
+    reports_to = 2,
+    photo_path = 'test'
+WHERE employee_id = 10;
+
+-- EMPLOYEE TERRITORIES
+UPDATE employee_territories
+SET territory_id = '98105'
+WHERE employee_id = 10;
+
+-- CUSTOMERS
+UPDATE customers
+SET company_name = 'test_company',
+    contact_name = 'test_contact',
+    contact_title = 'test_c',
+    address = 'test_address',
+    city = 'test_city',
+    region = 'test_region',
+    postal_code = '11111',
+    country = 'test_country',
+    phone = '(111) 111-1111',
+    fax = NULL
+WHERE customer_id = 'TESTC';
+
+-- PRODUCTS
+UPDATE products
+SET product_name = 'test_product',
+    supplier_id = 30,
+    category_id = 9,
+    quantity_per_unit = '1 unit',
+    unit_price = 10.00,
+    units_in_stock = 50,
+    units_on_order = 0,
+    reorder_level = 10,
+    discontinued = 0
+WHERE product_id = 78;
+
+-- ORDERS
+UPDATE orders
+SET customer_id = 'TESTC',
+    employee_id = 10,
+    order_date = '2024-01-12',
+    required_date = '2024-01-20',
+    shipped_date = '2024-01-15',
+    ship_via = 7,
+    freight = 25.50,
+    ship_name = 'test_sh',
+    ship_address = 'test_address',
+    ship_city = 'test_city',
+    ship_region = 'test_region',
+    ship_postal_code = '11111',
+    ship_country = 'test_country'
+WHERE order_id = 20001;
+
+-- ORDER DETAILS
+UPDATE order_details
+SET unit_price = 10.00,
+    quantity = 5,
+    discount = 0.00
+WHERE order_id = 20001 AND product_id = 78;
