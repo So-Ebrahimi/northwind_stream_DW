@@ -32,7 +32,7 @@ PostgreSQL (OLTP) → Debezium (CDC) → Kafka → Spark (ETL) → ClickHouse (D
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- At least 8GB of available RAM
+- At least 16GB of available RAM
 - Windows PowerShell (for Windows) or Bash (for Linux/Mac)
 
 ## Quick Start
