@@ -399,18 +399,18 @@ services:
     volumes:
       - ./6-spark/scripts:/opt/bitnami/spark/scripts
       - ./6-spark/conf:/opt/bitnami/spark/conf
-    command:
-      [
-        "/opt/bitnami/spark/bin/spark-submit",
-        "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
-        "--driver-memory", "1g",
-        "--executor-memory", "1g",
-        "--conf", "spark.executor.instances=1",
-        "--conf", "spark.executor.cores=2",
-        "--conf", "spark.cores.max=4",
-        "--conf", "spark.sql.shuffle.partitions=10",
-        "/opt/bitnami/spark/scripts/northwind-dw.py"
-      ]
+    # command:
+    #   [
+    #     "/opt/bitnami/spark/bin/spark-submit",
+    #     "--master", "spark://spark-master:${SPARK_MASTER_PORT:-7077}",
+    #     "--driver-memory", "1g",
+    #     "--executor-memory", "1g",
+    #     "--conf", "spark.executor.instances=1",
+    #     "--conf", "spark.executor.cores=2",
+    #     "--conf", "spark.cores.max=4",
+    #     "--conf", "spark.sql.shuffle.partitions=10",
+    #     "/opt/bitnami/spark/scripts/northwind-dw.py"
+    #   ]
     networks:
       - ProjectHost
     restart: unless-stopped

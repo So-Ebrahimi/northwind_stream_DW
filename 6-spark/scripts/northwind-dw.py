@@ -144,7 +144,16 @@ def assign_incremental_keys(df, key_column, natural_key_cols, target_table, exis
             new_rows,
             allowMissingColumns=True
             )
-
+        if "startdate" in new_rows.columns:
+            w_dedup = Window.partitionBy(*natural_key_cols).orderBy(col("startdate").asc())
+            new_rows = (
+                new_rows
+                .withColumn("__rn_dedup", row_number().over(w_dedup))
+                .filter(col("__rn_dedup") == 1)
+                .drop("__rn_dedup")
+            )
+        else:
+            new_rows = new_rows.dropDuplicates(natural_key_cols)
 
         if not new_rows.rdd.isEmpty():
             offset = get_max_key(target_table, key_column)
@@ -298,6 +307,41 @@ def add_to_geo(df_changed):
 
     return final_dim_geo, df_changed
 
+def scd2_close_previous_rows(table_name , business_key , startdate_col , enddate_col , last_run):
+    try:
+        logger.info(f"SCD2 close previous rows for {table_name}")
+
+        sql = f"""
+        ALTER TABLE {table_name}
+        UPDATE {enddate_col} = {last_run}
+        WHERE {enddate_col} IS NULL
+          AND {business_key} IN (
+              SELECT {business_key}
+              FROM {table_name}
+              GROUP BY {business_key}
+              HAVING count() > 1
+          )
+          AND {startdate_col} <
+          (
+              SELECT max({startdate_col})
+              FROM {table_name} d2
+              WHERE d2.{business_key} = {table_name}.{business_key}
+          )
+        """
+
+        spark.read.format("jdbc") \
+            .option("driver", CLICKHOUSE_DRIVER) \
+            .option("url", CLICKHOUSE_URL) \
+            .option("user", CLICKHOUSE_USER) \
+            .option("password", CLICKHOUSE_PASS) \
+            .option("query", sql) \
+            .load()
+
+        logger.info(f"SCD2 update executed for {table_name}")
+
+    except Exception as exc:
+        logger.error(f"SCD2 update failed for {table_name}: {exc}", exc_info=True)
+        raise
 
 def process_dim_customers(last_run):
     try:
