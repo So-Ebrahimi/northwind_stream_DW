@@ -5,11 +5,34 @@ Real-time CDC pipeline that streams Northwind OLTP changes from PostgreSQL into 
 ## Architecture at a Glance
 
 ```
-PostgreSQL → Debezium → Kafka → Spark (CDC + DW ETL) → ClickHouse → Grafana
+PostgreSQL (OLTP) → Debezium → Kafka → Spark (CDC + DW ETL) → ClickHouse → Grafana
 ```
+![Grafana Dashboard](0-info/grafana-dashboard.PNG)
+### Pipeline Flow
+1. **PostgreSQL**: Source OLTP database containing the Northwind sample database
+2. **Debezium**: Captures database changes using PostgreSQL logical replication
+3. **Kafka**: Message broker that stores CDC events as topics
+4. **Spark**: Processes streaming data and performs ETL transformations
+   - **CDC Streaming Job**: Streams data from Kafka to ClickHouse staging tables
+   - **DW ETL Job**: Builds star schema dimensions and facts from staging tables (incremental)(SCD2)
+5. **ClickHouse**: Data warehouse with star schema design for analytical queries
+6. **Grafana**: Visualization and monitoring dashboards
 
-![Pipeline Overview](0-info/northwind-oltp.PNG)
+## Technology Stack
 
+- **PostgreSQL 18**: Source database (OLTP)
+- **Zookeeper**: Coordination service for Kafka and ClickHouse 
+- **Debezium**: Change Data Capture connector
+- **Apache Kafka**: Distributed streaming platform
+- **Apache Spark**: Distributed data processing engine
+- **ClickHouse**: Column-oriented database for analytics
+- **Grafana**: Monitoring and visualization platform
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- At least 16GB of available RAM
+- Windows PowerShell (for Windows) or Bash (for Linux/Mac)
 ## Repository Layout
 
 ```
@@ -80,6 +103,10 @@ All services share the `ProjectHost` Docker network.
    - Fact tables: `FactOrders`, `FactEmployeeTerritories`; DimDate pre-seeded 1970–2050.
 4. **Visualization**: Grafana dashboards query ClickHouse DW.
 
+## Nortwind db design(oltp)
+![Pipeline Overview](0-info/northwind-oltp.PNG)
+
+## Nortwind DataWarehouse design
 ![DW Schema](0-info/dw-design.PNG)
 
 ## Run the Stack (recommended)
