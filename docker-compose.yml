@@ -356,6 +356,8 @@ services:
         condition: service_healthy
       clickhouse1:
         condition: service_healthy
+      debezium-connect:
+        condition: service_healthy
     environment:
       HOME: /tmp
     volumes:
@@ -394,6 +396,7 @@ services:
         condition: service_healthy
       pyspark-job-cdc:
         condition: service_started
+
     environment:
       HOME: /tmp
     volumes:

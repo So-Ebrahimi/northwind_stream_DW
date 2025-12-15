@@ -4977,7 +4977,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Advanced ClickHouse Monitoring Dashboard",
+  "title": "ClickHouse Monitoring",
   "uid": "f6c72fef-d88c-4134-bc47-2945ca3989f8",
   "version": 1
 }
