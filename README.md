@@ -167,10 +167,19 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 
 ## TODO
 
+- Reaname ClickHouse dw name from default to nortwind-dw.
 - Add automated smoke checks (topic existence, CH row counts) to a `make verify` script.
 - Wire replica2 ClickHouse service and validate replication configs.
 - Parameterize credentials/ports via `.env` templates per service.
 - Add data-quality assertions inside `northwind-dw.py` (null key drop counts, thresholds).
 - Publish sample Grafana dashboard screenshots in README for quick preview.
 
-![Demo](0-info/tests.mp4)
+
+## picturs
+![1](0-info/kafka.PNG)
+![1](0-info/kafka.PNG)
+![2](0-info/spark.PNG)
+![3](0-info/clickhouse.PNG)
+![4](0-info/clickhouse-monitoring.PNG)
+![5](0-info/grafana-dashboard.PNG)
+![6](0-info/docker.PNG)
