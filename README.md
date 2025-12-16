@@ -135,7 +135,6 @@ To run per layer (if debugging): bring up `1-postgres`, `3-kafka`, `4-debezium`,
 - Grafana: http://localhost:12345 (datasource + dashboards pre-provisioned)
 - Debezium Connect API: http://localhost:18083
 
-![Grafana Dashboard](0-info/grafana-dashboard.PNG)
 
 ## Implementation Notes
 
@@ -173,3 +172,5 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 - Parameterize credentials/ports via `.env` templates per service.
 - Add data-quality assertions inside `northwind-dw.py` (null key drop counts, thresholds).
 - Publish sample Grafana dashboard screenshots in README for quick preview.
+
+![Demo](0-info/tests.mp4)

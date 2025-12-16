@@ -1,0 +1,16 @@
+docker network create ProjectHost
+docker-compose up -d --force-recreate
+docker ps
+docker exec postgres pg_isready
+docker exec -it postgres psql -U postgres -d northwind -c "\dt" 
+docker exec -it postgres psql -U postgres -d northwind -c "INSERT INTO public.orders (order_id,customer_id,employee_id,order_date,required_date,shipped_date,ship_via,freight,ship_name,ship_address,ship_city,ship_region,ship_postal_code,ship_country) VALUES(11078,'LEHMS',2,'1998-05-05','1998-06-02',NULL,1,136.0,'Lehmanns Marktstand','Magazinweg 7','Frankfurt a.M.',NULL,'60528','Germany');" 
+docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list | findstr northwind.public
+docker exec clickhouse1 clickhouse-client --query "SELECT 1"
+docker exec -it clickhouse1 clickhouse-client -d default -q "SHOW TABLES"
+docker exec clickhouse1 clickhouse-client --query "SELECT count() FROM northwind.northwind_orders"
+docker exec -it clickhouse1 clickhouse-client -d northwind -q "SHOW TABLES"
+docker exec clickhouse1 clickhouse-client --query "SELECT count() FROM FactOrders"
+docker exec clickhouse1 clickhouse-client --query "SELECT count() FROM DimCustomer"
+docker exec pyspark-job-dw cat /opt/bitnami/spark/last_run.txt
+docker logs --tail 50 pyspark-job-cdc
+docker logs --tail 50 pyspark-job-dw 
