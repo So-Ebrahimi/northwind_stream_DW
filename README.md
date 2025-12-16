@@ -177,7 +177,6 @@ docker-compose -f ./1-postgres/docker-compose.yml down
 
 ## picturs
 ![1](0-info/kafka.PNG)
-![1](0-info/kafka.PNG)
 ![2](0-info/spark.PNG)
 ![3](0-info/clickhouse.PNG)
 ![4](0-info/clickhouse-monitoring.PNG)
